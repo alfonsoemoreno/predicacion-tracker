@@ -22,7 +22,8 @@ RETURNS trigger AS $$
 DECLARE
 	conflict_id uuid;
 BEGIN
-	IF NEW.type = 'preaching' THEN
+	-- Incluye predicación y servicio sagrado (ambos con rango horario)
+	IF NEW.type IN ('preaching','sacred_service') THEN
 		-- Normaliza formato HH:MM:SS (por si vienen con HH:MM)
 		IF NEW.start_time IS NULL OR NEW.end_time IS NULL THEN
 			RAISE EXCEPTION 'RANGO_INCOMPLETO' USING ERRCODE = 'check_violation';
@@ -32,7 +33,7 @@ BEGIN
 		FROM activity_entries
 		WHERE user_id = NEW.user_id
 			AND activity_date = NEW.activity_date
-			AND type = 'preaching'
+			AND type IN ('preaching','sacred_service')
 			AND id <> COALESCE(NEW.id, '00000000-0000-0000-0000-000000000000')
 			AND NEW.start_time < end_time AND NEW.end_time > start_time
 		LIMIT 1;
@@ -52,7 +53,7 @@ FOR EACH ROW EXECUTE FUNCTION prevent_preaching_overlap();
 -- Optional performance index to support overlap search (composite)
 CREATE INDEX IF NOT EXISTS idx_activity_preaching_day_time
 ON activity_entries (user_id, activity_date, start_time, end_time)
-WHERE type = 'preaching';
+WHERE type IN ('preaching','sacred_service');
 
 -- Client handling suggestion:
 -- If error.message includes 'OVERLAP_PREACHING' show friendly message:
@@ -143,4 +144,59 @@ BEFORE DELETE ON activity_entries
 FOR EACH ROW EXECUTE FUNCTION prevent_delete_locked_month();
 
 -- Client should map MES_CERRADO to: 'El mes ya está cerrado por un informe generado.'
+
+--------------------------------------------------------------------------------
+-- 4.a RLS Policies for monthly_reports (solo acceso del propio usuario)
+--------------------------------------------------------------------------------
+-- Habilitar RLS (ejecutar una sola vez)
+ALTER TABLE monthly_reports ENABLE ROW LEVEL SECURITY;
+
+-- Lectura: solo filas del usuario autenticado
+DO $$
+BEGIN
+	IF NOT EXISTS (
+		SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'monthly_reports' AND policyname = 'sel_monthly_reports_own'
+	) THEN
+		CREATE POLICY sel_monthly_reports_own ON monthly_reports
+			FOR SELECT USING (auth.uid() = user_id);
+	END IF;
+END $$;
+
+-- Inserción: solo permitida si user_id = auth.uid()
+DO $$
+BEGIN
+	IF NOT EXISTS (
+		SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'monthly_reports' AND policyname = 'ins_monthly_reports_self'
+	) THEN
+		CREATE POLICY ins_monthly_reports_self ON monthly_reports
+			FOR INSERT WITH CHECK (auth.uid() = user_id);
+	END IF;
+END $$;
+
+-- (Opcional / comentado) Permitir UPDATE solo si el mes NO está bloqueado.
+-- Descomentar si en el futuro se quiere una acción para editar antes de cerrar.
+-- DO $$
+-- BEGIN
+--   IF NOT EXISTS (
+--     SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'monthly_reports' AND policyname = 'upd_monthly_reports_unlocked'
+--   ) THEN
+--     CREATE POLICY upd_monthly_reports_unlocked ON monthly_reports
+--       FOR UPDATE USING (auth.uid() = user_id AND locked = false)
+--       WITH CHECK (auth.uid() = user_id AND locked = false);
+--   END IF;
+-- END $$;
+
+-- No se crea policy DELETE -> elimina la capacidad de borrar informes (se mantienen como histórico).
+
+-- NOTA: Asegúrate de tener "service_role" (o usar la consola) para ejecutar ALTER/CREATE POLICY.
+
+--------------------------------------------------------------------------------
+-- 5. Servicio sagrado: Ajustes
+--------------------------------------------------------------------------------
+-- Añadir columnas adicionales a monthly_reports si no existen ya
+ALTER TABLE monthly_reports ADD COLUMN IF NOT EXISTS sacred_service_minutes int NOT NULL DEFAULT 0;
+ALTER TABLE monthly_reports ADD COLUMN IF NOT EXISTS comments text;
+
+-- Nota: total_minutes continúa representando solo predicación.
+-- sacred_service_minutes se mostrará en informes y estadísticas aparte; no afecta cálculo de horas completas ni rollover.
 

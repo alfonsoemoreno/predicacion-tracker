@@ -50,7 +50,7 @@ const localizer = dateFnsLocalizer({
 interface EntryEvent extends RBCEvent {
   id: string;
   minutes: number; // store 0 if null in DB
-  type: "preaching" | "bible_course";
+  type: "preaching" | "bible_course" | "sacred_service";
   person_id?: string | null;
   person_name?: string | null;
   person_color?: string | null;
@@ -71,9 +71,9 @@ export default function CalendarView() {
     return new Date();
   });
   const [modalOpen, setModalOpen] = useState(false);
-  const [modalType, setModalType] = useState<"preaching" | "bible_course">(
-    "preaching"
-  );
+  const [modalType, setModalType] = useState<
+    "preaching" | "bible_course" | "sacred_service"
+  >("preaching");
   const [modalDate, setModalDate] = useState<Date | null>(null);
   interface EditData {
     id: string;
@@ -187,7 +187,11 @@ export default function CalendarView() {
       let startDate: Date;
       let endDate: Date;
       let allDay = false;
-      if (row.type === "preaching" && st && et) {
+      if (
+        (row.type === "preaching" || row.type === "sacred_service") &&
+        st &&
+        et
+      ) {
         startDate = new Date(y, m - 1, d, st.h, st.m);
         endDate = new Date(y, m - 1, d, et.h, et.m);
         if (endDate <= startDate) {
@@ -215,13 +219,15 @@ export default function CalendarView() {
 
       const personName = row.persons?.name || null;
       const personColor = row.persons?.color || null;
-      const baseTitle =
-        row.type === "bible_course" && personName
-          ? personName
-          : row.title ||
-            (row.type === "preaching"
-              ? `Predicación${rangeLabel} ${minutesLabel}`.trim()
-              : `Curso ${minutesLabel}`.trim());
+      const baseTitle = (() => {
+        if (row.type === "bible_course" && personName) return personName;
+        if (row.title) return row.title;
+        if (row.type === "preaching")
+          return `Predicación${rangeLabel} ${minutesLabel}`.trim();
+        if (row.type === "sacred_service")
+          return `Serv. sagrado${rangeLabel}`.trim();
+        return `Curso ${minutesLabel}`.trim();
+      })();
       return {
         id: row.id,
         title: baseTitle,
@@ -396,7 +402,10 @@ export default function CalendarView() {
     id?: string;
   }) => {
     return events
-      .filter((e) => e.type === "preaching" && !e.allDay)
+      .filter(
+        (e) =>
+          (e.type === "preaching" || e.type === "sacred_service") && !e.allDay
+      )
       .some((e) => {
         if (id && e.id === id) return false; // skip self when editing
         return start < (e.end as Date) && end > (e.start as Date);
@@ -641,11 +650,17 @@ export default function CalendarView() {
               style.color = "#222";
               style.fontWeight = 600;
             }
-            const cls = isCourse ? "event-bible_course" : "event-preaching";
+            const cls = isCourse
+              ? "event-bible_course"
+              : event.type === "sacred_service"
+              ? "event-sacred_service"
+              : "event-preaching";
             // Añadimos título accesible (aria-label a través de title para fallback) con tipo y duración si aplica
             const labelParts: string[] = [];
             if (event.type === "preaching") labelParts.push("Predicación");
             if (event.type === "bible_course") labelParts.push("Curso bíblico");
+            if (event.type === "sacred_service")
+              labelParts.push("Servicio sagrado");
             if (typeof event.title === "string") labelParts.push(event.title);
             if (!event.allDay) {
               const start = event.start as Date;

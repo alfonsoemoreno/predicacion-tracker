@@ -73,7 +73,12 @@ export default function EstadisticasPage() {
     const preachingMinutesYear = rows
       .filter((r) => r.type === "preaching")
       .reduce((acc, r) => acc + (r.minutes || 0), 0);
+    const sacredMinutesYear = rows
+      .filter((r) => r.type === "sacred_service")
+      .reduce((acc, r) => acc + (r.minutes || 0), 0);
     const hoursYear = preachingMinutesYear / 60;
+    const sacredHoursYear = sacredMinutesYear / 60;
+    const combinedHoursYear = (preachingMinutesYear + sacredMinutesYear) / 60;
     const monthsElapsed = (() => {
       // Count how many full or partial months in range up to now (inclusive current month if in range)
       const months: Date[] = [];
@@ -99,6 +104,8 @@ export default function EstadisticasPage() {
         : 0;
     return {
       hoursYear,
+      sacredHoursYear,
+      combinedHoursYear,
       hoursRemainingAnnual,
       hoursBehindMonthlyAverage,
       monthlyAverageCurrent,
@@ -212,6 +219,32 @@ export default function EstadisticasPage() {
           <Card sx={{ flex: 1 }} variant="outlined">
             <CardContent>
               <Typography variant="overline" sx={{ fontWeight: 600 }}>
+                Servicio sagrado (h)
+              </Typography>
+              <Typography variant="h4" fontWeight={700}>
+                {metrics.sacredHoursYear.toFixed(1)}
+              </Typography>
+              <Typography variant="caption" sx={{ opacity: 0.7 }}>
+                No suma a meta 600h
+              </Typography>
+            </CardContent>
+          </Card>
+          <Card sx={{ flex: 1 }} variant="outlined">
+            <CardContent>
+              <Typography variant="overline" sx={{ fontWeight: 600 }}>
+                Total combinado (h)
+              </Typography>
+              <Typography variant="h4" fontWeight={700}>
+                {metrics.combinedHoursYear.toFixed(1)}
+              </Typography>
+              <Typography variant="caption" sx={{ opacity: 0.7 }}>
+                Predicación + Serv. sagrado
+              </Typography>
+            </CardContent>
+          </Card>
+          <Card sx={{ flex: 1 }} variant="outlined">
+            <CardContent>
+              <Typography variant="overline" sx={{ fontWeight: 600 }}>
                 Promedio mensual actual
               </Typography>
               <Typography variant="h4" fontWeight={700}>
@@ -255,9 +288,9 @@ export default function EstadisticasPage() {
         </Stack>
         <Divider />
         <Typography variant="body2" sx={{ opacity: 0.7 }}>
-          El año teocrático se calcula desde septiembre hasta agosto. Estas
-          métricas consideran únicamente actividades de tipo predicación para el
-          conteo de horas.
+          Año teocrático: septiembre a agosto. La meta anual (600h) sólo cuenta
+          predicación. “Servicio sagrado” se informa aparte y también aparece el
+          total combinado para referencia.
         </Typography>
       </Box>
       <Snackbar

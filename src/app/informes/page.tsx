@@ -142,46 +142,165 @@ export default function InformesPage() {
             save(name: string): void;
           };
         });
-      const doc = new JsPDFCtor();
-      doc.setFontSize(14);
-      doc.text(`Informes mensuales año teocrático ${yearLabel}`, 14, 16);
-      doc.setFontSize(10);
-      const startY = 26;
-      let y = startY;
-      doc.text("Mes", 14, y);
-      doc.text("Horas", 44, y);
-      doc.text("Carried In", 64, y);
-      doc.text("Carried Out", 94, y);
-      doc.text("Estudios", 124, y);
-      doc.text("Fecha", 154, y);
-      y += 4;
-      reports.forEach((r) => {
-        const date = new Date(r.created_at).toLocaleDateString("es-ES");
-        doc.text(monthName(r.month_index), 14, y);
-        doc.text(String(r.whole_hours), 44, y);
-        doc.text(`${r.carried_in_minutes}m`, 64, y);
-        doc.text(`${r.carried_out_minutes}m`, 94, y);
-        doc.text(String(r.distinct_studies), 124, y);
-        doc.text(date, 154, y);
-        y += 4;
-        if (y > 270) {
-          doc.addPage();
-          y = 16;
-        }
-      });
-      y += 6;
-      doc.setFontSize(12);
-      doc.text(`Total horas completas: ${totalWholeHours}h`, 14, y);
-      y += 6;
-      doc.text(`Minutos pendientes finales: ${finalLeftover}m`, 14, y);
-      y += 6;
-      const annualGoal = 600; // constant
+      // Tipado mínimo para evitar 'any' manteniendo compatibilidad
+      type SimpleJsPDF = {
+        setFontSize(n: number): void;
+        setTextColor(r: number, g?: number, b?: number): void;
+        text(txt: string, x: number, y: number): void;
+        addPage(): void;
+        save(name: string): void;
+        rect(x: number, y: number, w: number, h: number, style?: string): void;
+        line(x1: number, y1: number, x2: number, y2: number): void;
+        setDrawColor(r: number, g?: number, b?: number): void;
+        setFillColor(r: number, g?: number, b?: number): void;
+        splitTextToSize(text: string, size: number): string[];
+        setFont?: (family?: string, style?: string, size?: number) => void;
+      };
+      const doc: SimpleJsPDF = new JsPDFCtor() as unknown as SimpleJsPDF;
+      // Encabezado
+      doc.setFontSize(16);
       doc.text(
-        `Meta anual: ${annualGoal}h | Avance: ${totalWholeHours}h (${(
-          (totalWholeHours / annualGoal) *
-          100
-        ).toFixed(1)}%)`,
+        `Informes mensuales · Año teocrático ${yearLabel}`.trim(),
         14,
+        18
+      );
+      doc.setFontSize(9);
+      doc.setTextColor(80);
+      doc.text("Generado: " + new Date().toLocaleString("es-ES"), 14, 24);
+
+      // Definición de columnas (suma aprox <= 180mm en A4 con margen izq 14)
+      const columns: { key: string; header: string; width: number }[] = [
+        { key: "month", header: "Mes", width: 22 },
+        { key: "hours", header: "Horas", width: 14 },
+        { key: "in", header: "Min entran", width: 22 },
+        { key: "out", header: "Min salen", width: 22 },
+        { key: "sacred", header: "Serv. sagrado", width: 26 },
+        { key: "studies", header: "Estudios", width: 18 },
+        { key: "comments", header: "Comentarios", width: 48 },
+        { key: "date", header: "Generado", width: 26 },
+      ];
+      const startX = 14;
+      let y = 32;
+      const lineHeight = 4.2;
+      const pageBottom = 282; // margen para A4 (297mm) dejando footer opcional
+
+      const drawHeader = () => {
+        // Fondo encabezado
+        doc.setFillColor(240, 242, 245);
+        const totalWidth = columns.reduce((a, c) => a + c.width, 0);
+        doc.rect(startX - 2, y - 3.2, totalWidth + 4, 7.4, "F");
+        doc.setFontSize(9);
+        doc.setTextColor(30);
+        doc.setFont?.("helvetica", "bold");
+        let x = startX;
+        columns.forEach((col) => {
+          doc.text(col.header, x, y);
+          x += col.width;
+        });
+        doc.setFont?.("helvetica", "normal");
+        y += lineHeight + 1;
+        // Línea divisoria
+        doc.setDrawColor(200);
+        doc.line(startX - 2, y - 2.2, startX - 2 + totalWidth + 4, y - 2.2);
+      };
+
+      drawHeader();
+
+      const ensurePage = (rowHeight: number) => {
+        if (y + rowHeight > pageBottom) {
+          doc.addPage();
+          y = 20;
+          drawHeader();
+        }
+      };
+
+      const totalSacredMinutes = reports.reduce(
+        (a, r) => a + (r.sacred_service_minutes || 0),
+        0
+      );
+
+      // Filas
+      reports.forEach((r, idx) => {
+        const cells: Record<string, string | string[]> = {
+          month: monthName(r.month_index),
+          hours: String(r.whole_hours),
+          in: `${r.carried_in_minutes}m`,
+          out: `${r.carried_out_minutes}m`,
+          sacred: String(r.sacred_service_minutes ?? 0),
+          studies: String(r.distinct_studies),
+          comments: r.comments ? r.comments.trim() : "",
+          date: new Date(r.created_at).toLocaleDateString("es-ES"),
+        };
+        // Wrap comentarios
+        const commentsRaw = Array.isArray(cells.comments)
+          ? cells.comments.join(" ")
+          : cells.comments;
+        const commentLines: string[] = commentsRaw
+          ? doc.splitTextToSize(commentsRaw, 46)
+          : [""]; // width a mano (columns[6].width - padding)
+        const rowHeight = Math.max(
+          commentLines.length * lineHeight,
+          lineHeight
+        );
+        ensurePage(rowHeight + 2);
+        let x = startX;
+        // Zebra strip
+        if (idx % 2 === 0) {
+          doc.setFillColor(252, 252, 252);
+          doc.rect(
+            startX - 2,
+            y - lineHeight + 1,
+            columns.reduce((a, c) => a + c.width, 0) + 4,
+            rowHeight,
+            "F"
+          );
+        }
+        columns.forEach((col) => {
+          const value = cells[col.key];
+          if (col.key === "comments") {
+            commentLines.forEach((ln, i) => {
+              doc.text(String(ln), x, y + i * lineHeight);
+            });
+          } else {
+            doc.text(String(value), x, y);
+          }
+          x += col.width;
+        });
+        y += rowHeight + 1;
+      });
+
+      // Resumen
+      y += 2;
+      ensurePage(30);
+      doc.setFontSize(11);
+      doc.setFont?.("helvetica", "bold");
+      const totalHoursLine = `Total horas completas (predicación): ${totalWholeHours}h`;
+      doc.text(totalHoursLine, startX, y);
+      y += 6;
+      doc.setFont?.("helvetica", "normal");
+      doc.text(`Minutos pendientes finales: ${finalLeftover}m`, startX, y);
+      y += 6;
+      const sacredH = Math.floor(totalSacredMinutes / 60);
+      const sacredM = totalSacredMinutes % 60;
+      doc.text(
+        `Servicio sagrado total: ${sacredH}h ${sacredM}m (${totalSacredMinutes}m)`,
+        startX,
+        y
+      );
+      y += 6;
+      const annualGoal = 600;
+      const pct = ((totalWholeHours / annualGoal) * 100).toFixed(1);
+      doc.text(
+        `Meta anual predicación: ${annualGoal}h · Avance: ${totalWholeHours}h (${pct}%)`,
+        startX,
+        y
+      );
+      y += 6;
+      doc.setTextColor(120);
+      doc.setFontSize(8);
+      doc.text(
+        "Nota: 'Servicio sagrado' se registra aparte y no se suma a las horas de predicación.",
+        startX,
         y
       );
       doc.save(`informes_${yearLabel}.pdf`);
@@ -305,7 +424,9 @@ export default function InformesPage() {
                   <TableCell>Horas</TableCell>
                   <TableCell>Min entran</TableCell>
                   <TableCell>Min salen</TableCell>
+                  <TableCell>Serv. sagrado (min)</TableCell>
                   <TableCell>Estudios</TableCell>
+                  <TableCell>Comentarios</TableCell>
                   <TableCell>Generado</TableCell>
                 </TableRow>
               </TableHead>
@@ -318,7 +439,18 @@ export default function InformesPage() {
                     <TableCell>{r.whole_hours}</TableCell>
                     <TableCell>{r.carried_in_minutes}m</TableCell>
                     <TableCell>{r.carried_out_minutes}m</TableCell>
+                    <TableCell>{r.sacred_service_minutes ?? 0}</TableCell>
                     <TableCell>{r.distinct_studies}</TableCell>
+                    <TableCell
+                      sx={{
+                        maxWidth: 140,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {r.comments || ""}
+                    </TableCell>
                     <TableCell>
                       {new Date(r.created_at).toLocaleDateString("es-ES")}
                     </TableCell>
@@ -326,7 +458,7 @@ export default function InformesPage() {
                 ))}
                 {reports.length === 0 && !loading && (
                   <TableRow>
-                    <TableCell colSpan={6} style={{ opacity: 0.7 }}>
+                    <TableCell colSpan={8} style={{ opacity: 0.7 }}>
                       Sin informes todavía.
                     </TableCell>
                   </TableRow>

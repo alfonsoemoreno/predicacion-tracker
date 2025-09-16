@@ -19,3 +19,47 @@ body {
   font-size: 10px;
   opacity: 0.75;
 }
+
+/* Event type specific styling */
+.event-preaching {
+  background: linear-gradient(135deg, #1976d2, #42a5f5);
+  color: #fff;
+  border: 1px solid #1565c0;
+  font-weight: 600;
+}
+
+.event-bible_course {
+  /* Color set inline by person color; add subtle overlay for readability */
+  position: relative;
+}
+.event-bible_course::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    0deg,
+    rgba(255, 255, 255, 0.15),
+    rgba(255, 255, 255, 0)
+  );
+  pointer-events: none;
+}
+
+/* New distinctive styling for sacred service */
+.event-sacred_service {
+  background: linear-gradient(
+    135deg,
+    #6d1b7b,
+    #ab47bc
+  ); /* deep purple to lighter */
+  color: #fff;
+  border: 1px solid #4a1356;
+  font-weight: 600;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.15) inset;
+}
+
+/* Improve focus visibility inside calendar events for accessibility */
+.rbc-event:focus,
+.rbc-event.rbc-selected {
+  outline: 2px solid #ffb74d;
+  outline-offset: 1px;
+}

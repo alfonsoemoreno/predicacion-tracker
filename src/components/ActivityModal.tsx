@@ -18,7 +18,7 @@ import CircularProgress from "@mui/material/CircularProgress";
 interface Props {
   open: boolean;
   mode: "create" | "edit";
-  type: "preaching" | "bible_course";
+  type: "preaching" | "bible_course" | "sacred_service";
   date: Date | null; // selected date
   initialData?: {
     id?: string;
@@ -82,7 +82,7 @@ export default function ActivityModal({
     if (!open) return;
     setError(null);
     if (mode === "edit" && initialData) {
-      if (type === "preaching") {
+      if (type === "preaching" || type === "sacred_service") {
         if (initialData.start_time)
           setStartTime(initialData.start_time.substring(0, 5));
         if (initialData.end_time)
@@ -100,9 +100,9 @@ export default function ActivityModal({
     }
   }, [open, mode, initialData, type]);
 
-  const [localType, setLocalType] = useState<"preaching" | "bible_course">(
-    type
-  );
+  const [localType, setLocalType] = useState<
+    "preaching" | "bible_course" | "sacred_service"
+  >(type);
   useEffect(() => {
     if (open) setLocalType(type);
   }, [type, open]);
@@ -112,7 +112,7 @@ export default function ActivityModal({
 
   const validate = () => {
     if (!date) return "Fecha requerida";
-    if (localType === "preaching") {
+    if (localType === "preaching" || localType === "sacred_service") {
       if (!startTime || !endTime) return "Horas inicio y fin requeridas";
       const toM = (t: string) => {
         const [h, m] = t.split(":").map(Number);
@@ -121,7 +121,6 @@ export default function ActivityModal({
       const diff = toM(endTime) - toM(startTime);
       if (diff <= 0) return "La hora fin debe ser mayor que inicio";
     } else {
-      // person is now mandatory for course
       if (!personId) return "Selecciona la persona";
       if (
         existingCoursePersonIdsForDay &&
@@ -131,6 +130,8 @@ export default function ActivityModal({
         return "Ya registraste un curso para esta persona este día";
       }
     }
+    if (localType === "sacred_service" && !title.trim())
+      return "Título requerido";
     return null;
   };
 
@@ -153,7 +154,7 @@ export default function ActivityModal({
     interface Payload {
       user_id: string;
       activity_date?: string;
-      type: "preaching" | "bible_course";
+      type: "preaching" | "bible_course" | "sacred_service";
       start_time?: string;
       end_time?: string;
       minutes?: number;
@@ -172,17 +173,26 @@ export default function ActivityModal({
       type: localType,
     };
 
-    if (localType === "preaching") {
+    if (localType === "preaching" || localType === "sacred_service") {
       payload.start_time = startTime + ":00";
       payload.end_time = endTime + ":00";
     } else {
-      // bible_course: only person
       payload.person_id = personId;
     }
-    if (localType === "preaching" && title.trim()) payload.title = title.trim();
+    if (
+      (localType === "preaching" || localType === "sacred_service") &&
+      title.trim()
+    )
+      payload.title = title.trim();
 
     // Overlap check client side for preaching
-    if (localType === "preaching" && date && startTime && endTime) {
+    if (
+      (localType === "preaching" || localType === "sacred_service") &&
+      date &&
+      startTime &&
+      endTime
+    ) {
+      // overlap range check
       const [sh, sm] = startTime.split(":").map(Number);
       const [eh, em] = endTime.split(":").map(Number);
       const start = new Date(
@@ -203,7 +213,7 @@ export default function ActivityModal({
         validateOverlap &&
         validateOverlap({ start, end, id: initialData?.id })
       ) {
-        setError("Se traslapa con otra actividad de predicación");
+        setError("Se traslapa con otra actividad de tiempo con rango");
         setSaving(false);
         return;
       }
@@ -224,7 +234,7 @@ export default function ActivityModal({
       const msgRaw = dbError.message || "Error guardando";
       let friendly = msgRaw;
       if (msgRaw.includes("OVERLAP_PREACHING")) {
-        friendly = "Se traslapa con otra actividad de predicación";
+        friendly = "Se traslapa con otra actividad de tiempo con rango";
       } else if (msgRaw.includes("RANGO_INCOMPLETO")) {
         friendly = "Rango de horas incompleto";
       } else if (msgRaw.includes("ux_activity_entries_course_person_day")) {
@@ -249,7 +259,11 @@ export default function ActivityModal({
           component="span"
           sx={{ color: "primary.main", fontWeight: 600 }}
         >
-          {localType === "preaching" ? "predicación" : "curso bíblico"}
+          {localType === "preaching"
+            ? "predicación"
+            : localType === "bible_course"
+            ? "curso bíblico"
+            : "servicio sagrado"}
         </Typography>
         <Typography
           variant="caption"
@@ -267,16 +281,22 @@ export default function ActivityModal({
           value={localType}
           exclusive
           onChange={(_, v) => {
-            if (v === "preaching" || v === "bible_course") setLocalType(v);
+            if (
+              v === "preaching" ||
+              v === "bible_course" ||
+              v === "sacred_service"
+            )
+              setLocalType(v);
           }}
           size="small"
           sx={{ alignSelf: "flex-start" }}
         >
           <ToggleButton value="preaching">Predicación</ToggleButton>
           <ToggleButton value="bible_course">Curso</ToggleButton>
+          <ToggleButton value="sacred_service">Serv. sagrado</ToggleButton>
         </ToggleButtonGroup>
 
-        {localType === "preaching" && (
+        {(localType === "preaching" || localType === "sacred_service") && (
           <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
             <TextField
               label="Inicio"
@@ -330,9 +350,13 @@ export default function ActivityModal({
           />
         )}
 
-        {localType === "preaching" && (
+        {(localType === "preaching" || localType === "sacred_service") && (
           <TextField
-            label="Título (opcional)"
+            label={
+              localType === "sacred_service"
+                ? "Título (requerido)"
+                : "Título (opcional)"
+            }
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Ej: Servicio matutino"

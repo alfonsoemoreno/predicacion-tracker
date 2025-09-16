@@ -14,6 +14,8 @@ export interface MonthlyReportRow {
   leftover_minutes: number;
   effective_minutes: number;
   distinct_studies: number;
+  sacred_service_minutes?: number;
+  comments?: string | null;
   locked: boolean;
   created_at: string;
 }
@@ -55,6 +57,7 @@ export async function fetchReports(baseYear: number) {
 export interface MonthAggregateResult {
   totalMinutes: number;
   distinctStudies: number;
+  sacredServiceMinutes: number;
 }
 
 export async function aggregateMonth(
@@ -67,18 +70,24 @@ export async function aggregateMonth(
   // Preaching minutes
   const { data: preachingData, error: preachingErr } = await supabase
     .from("activity_entries")
-    .select("minutes, type, activity_date, person_id")
+    .select("minutes, type, activity_date, person_id, start_time, end_time")
     .gte("activity_date", from)
     .lt("activity_date", to);
   if (preachingErr) throw preachingErr;
   let totalMinutes = 0;
+  let sacredServiceMinutes = 0;
   const distinctStudyIds = new Set<string>();
   (preachingData || []).forEach((r) => {
     if (r.type === "preaching") totalMinutes += r.minutes || 0;
+    if (r.type === "sacred_service") sacredServiceMinutes += r.minutes || 0;
     if (r.type === "bible_course" && r.person_id)
       distinctStudyIds.add(r.person_id);
   });
-  return { totalMinutes, distinctStudies: distinctStudyIds.size };
+  return {
+    totalMinutes,
+    distinctStudies: distinctStudyIds.size,
+    sacredServiceMinutes,
+  };
 }
 
 export interface GenerateReportResult {
@@ -93,10 +102,8 @@ export async function generateMonthlyReportSequential(baseYear: number) {
   const reports = await fetchReports(baseYear);
   const nextIndex = reports.length; // sequential enforcement
   if (nextIndex > 11) throw new Error("Todos los meses ya están cerrados");
-  const { totalMinutes, distinctStudies } = await aggregateMonth(
-    baseYear,
-    nextIndex
-  );
+  const { totalMinutes, distinctStudies, sacredServiceMinutes } =
+    await aggregateMonth(baseYear, nextIndex);
   const carriedIn =
     reports.length === 0 ? 0 : reports[reports.length - 1].carried_out_minutes;
   const effective = totalMinutes + carriedIn;
@@ -116,6 +123,8 @@ export async function generateMonthlyReportSequential(baseYear: number) {
     leftover_minutes: leftover,
     effective_minutes: effective,
     distinct_studies: distinctStudies,
+    sacred_service_minutes: sacredServiceMinutes,
+    comments: null,
     locked: true,
   };
   const { data, error } = await supabase
