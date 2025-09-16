@@ -58,3 +58,89 @@ WHERE type = 'preaching';
 -- If error.message includes 'OVERLAP_PREACHING' show friendly message:
 --   'Se traslapa con otra actividad de predicación.'
 -- If includes 'RANGO_INCOMPLETO' -> 'Rango de horas incompleto.'
+
+--------------------------------------------------------------------------------
+-- 4. Monthly Reports (Informes Mensuales) with sequential locking & rollover
+--------------------------------------------------------------------------------
+-- Table stores one row per month in the theocratic year (Sep-Aug) once closed.
+-- Generation is sequential: only the next month_index after the latest exists.
+-- Rollover: leftover_minutes from previous month becomes carried_in_minutes of next.
+-- month_index: 0 = September, 11 = August (based on period_year start).
+
+CREATE TABLE IF NOT EXISTS monthly_reports (
+	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+	user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+	period_year int NOT NULL, -- theocratic year start (e.g. 2025 for Sep 2025 - Aug 2026)
+	month_index int NOT NULL CHECK (month_index BETWEEN 0 AND 11),
+	period_start date NOT NULL,
+	period_end date NOT NULL, -- exclusive
+	total_minutes int NOT NULL DEFAULT 0, -- minutes recorded in that calendar month
+	carried_in_minutes int NOT NULL DEFAULT 0, -- leftover from previous month
+	carried_out_minutes int NOT NULL DEFAULT 0, -- leftover to next month
+	whole_hours int NOT NULL DEFAULT 0, -- floor((total+carried_in)/60)
+	leftover_minutes int NOT NULL DEFAULT 0, -- (total+carried_in) % 60 (same as carried_out)
+	effective_minutes int NOT NULL DEFAULT 0, -- total + carried_in
+	distinct_studies int NOT NULL DEFAULT 0,
+	locked boolean NOT NULL DEFAULT true,
+	created_at timestamptz NOT NULL DEFAULT now(),
+	UNIQUE (user_id, period_year, month_index)
+);
+
+-- Helpful index
+CREATE INDEX IF NOT EXISTS idx_monthly_reports_user_year ON monthly_reports(user_id, period_year);
+
+-- Trigger to prevent modifications to activity_entries for locked months.
+CREATE OR REPLACE FUNCTION prevent_modifications_locked_month()
+RETURNS trigger AS $$
+DECLARE
+	rpt monthly_reports;
+BEGIN
+	SELECT * INTO rpt
+	FROM monthly_reports
+	WHERE user_id = NEW.user_id
+		AND NEW.activity_date >= period_start
+		AND NEW.activity_date < period_end
+		AND locked = true
+	LIMIT 1;
+	IF FOUND THEN
+		RAISE EXCEPTION 'MES_CERRADO' USING ERRCODE = 'check_violation';
+	END IF;
+	RETURN NEW;
+END;$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trg_block_locked_month_ins ON activity_entries;
+CREATE TRIGGER trg_block_locked_month_ins
+BEFORE INSERT ON activity_entries
+FOR EACH ROW EXECUTE FUNCTION prevent_modifications_locked_month();
+
+DROP TRIGGER IF EXISTS trg_block_locked_month_upd ON activity_entries;
+CREATE TRIGGER trg_block_locked_month_upd
+BEFORE UPDATE ON activity_entries
+FOR EACH ROW EXECUTE FUNCTION prevent_modifications_locked_month();
+
+-- Separate trigger for deletes: need OLD reference
+CREATE OR REPLACE FUNCTION prevent_delete_locked_month()
+RETURNS trigger AS $$
+DECLARE
+	rpt monthly_reports;
+BEGIN
+	SELECT * INTO rpt
+	FROM monthly_reports
+	WHERE user_id = OLD.user_id
+		AND OLD.activity_date >= period_start
+		AND OLD.activity_date < period_end
+		AND locked = true
+	LIMIT 1;
+	IF FOUND THEN
+		RAISE EXCEPTION 'MES_CERRADO' USING ERRCODE = 'check_violation';
+	END IF;
+	RETURN OLD;
+END;$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trg_block_locked_month_del ON activity_entries;
+CREATE TRIGGER trg_block_locked_month_del
+BEFORE DELETE ON activity_entries
+FOR EACH ROW EXECUTE FUNCTION prevent_delete_locked_month();
+
+-- Client should map MES_CERRADO to: 'El mes ya está cerrado por un informe generado.'
+

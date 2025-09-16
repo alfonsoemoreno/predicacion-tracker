@@ -21,6 +21,8 @@ import LogoutIcon from "@mui/icons-material/Logout";
 import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
 import PeopleIcon from "@mui/icons-material/People";
 import MenuIcon from "@mui/icons-material/Menu";
+import QueryStatsIcon from "@mui/icons-material/QueryStats";
+import DescriptionIcon from "@mui/icons-material/Description";
 
 export default function Navbar() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -151,6 +153,24 @@ export default function Navbar() {
           >
             Personas
           </Button>
+          <Button
+            startIcon={<QueryStatsIcon />}
+            component={Link as unknown as React.ElementType}
+            href="/estadisticas"
+            color="inherit"
+            sx={{ fontWeight: 500 }}
+          >
+            Estadísticas
+          </Button>
+          <Button
+            startIcon={<DescriptionIcon />}
+            component={Link as unknown as React.ElementType}
+            href="/informes"
+            color="inherit"
+            sx={{ fontWeight: 500 }}
+          >
+            Informes
+          </Button>
         </Box>
         <Box sx={{ flexGrow: 1 }} />
         <Tooltip title={mode === "light" ? "Modo oscuro" : "Modo claro"}>
@@ -254,6 +274,22 @@ export default function Navbar() {
             onClick={() => setNavAnchor(null)}
           >
             <PeopleIcon fontSize="small" style={{ marginRight: 8 }} /> Personas
+          </MenuItem>
+          <MenuItem
+            component={Link as unknown as React.ElementType}
+            href="/estadisticas"
+            onClick={() => setNavAnchor(null)}
+          >
+            <QueryStatsIcon fontSize="small" style={{ marginRight: 8 }} />{" "}
+            Estadísticas
+          </MenuItem>
+          <MenuItem
+            component={Link as unknown as React.ElementType}
+            href="/informes"
+            onClick={() => setNavAnchor(null)}
+          >
+            <DescriptionIcon fontSize="small" style={{ marginRight: 8 }} />{" "}
+            Informes
           </MenuItem>
         </Menu>
       </Toolbar>

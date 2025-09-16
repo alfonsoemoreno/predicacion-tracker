@@ -4,6 +4,7 @@ import {
   dateFnsLocalizer,
   Event as RBCEvent,
   SlotInfo,
+  View,
 } from "react-big-calendar";
 import "react-big-calendar/lib/css/react-big-calendar.css";
 import { format, parse, startOfWeek, getDay } from "date-fns";
@@ -17,7 +18,6 @@ import IconButton from "@mui/material/IconButton";
 import Typography from "@mui/material/Typography";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
-import Chip from "@mui/material/Chip";
 import Tooltip from "@mui/material/Tooltip";
 import ArrowBackIosNewIcon from "@mui/icons-material/ArrowBackIosNew";
 import ArrowForwardIosIcon from "@mui/icons-material/ArrowForwardIos";
@@ -29,6 +29,12 @@ import MenuItem from "@mui/material/MenuItem";
 import ListItemIcon from "@mui/material/ListItemIcon";
 import EditIcon from "@mui/icons-material/Edit";
 import DeleteIcon from "@mui/icons-material/Delete";
+import Chip from "@mui/material/Chip";
+import {
+  computeTheocraticYearBase,
+  monthIndexFromDate,
+  fetchReports,
+} from "@/lib/reports";
 
 // Localizador para react-big-calendar usando date-fns en español.
 const locales = { es } as const;
@@ -54,7 +60,16 @@ export default function CalendarView() {
   const [events, setEvents] = useState<EntryEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [viewDate, setViewDate] = useState<Date>(new Date());
+  const [viewDate, setViewDate] = useState<Date>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("calendarViewDate");
+      if (saved) {
+        const d = new Date(saved);
+        if (!isNaN(d.getTime())) return d;
+      }
+    }
+    return new Date();
+  });
   const [modalOpen, setModalOpen] = useState(false);
   const [modalType, setModalType] = useState<"preaching" | "bible_course">(
     "preaching"
@@ -76,6 +91,27 @@ export default function CalendarView() {
   }>({ open: false, message: "", severity: "success" });
   const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
   const [menuEvent, setMenuEvent] = useState<EntryEvent | null>(null);
+  // Locked months for current theocratic year (month_index list)
+  const [lockedMonthIndexes, setLockedMonthIndexes] = useState<number[]>([]);
+  // Persisted calendar view (month/week/day)
+  const [currentView, setCurrentView] = useState<View>(() => {
+    if (typeof window !== "undefined") {
+      const v = localStorage.getItem("calendarView") as View | null;
+      if (v === "month" || v === "week" || v === "day" || v === "agenda")
+        return v;
+    }
+    return "month";
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("calendarView", currentView);
+    } catch {}
+  }, [currentView]);
+  useEffect(() => {
+    try {
+      localStorage.setItem("calendarViewDate", viewDate.toISOString());
+    } catch {}
+  }, [viewDate]);
 
   const fetchEntries = useCallback(async () => {
     setLoading(true);
@@ -203,6 +239,32 @@ export default function CalendarView() {
     setLoading(false);
   }, []);
 
+  // Load locked months whenever viewDate changes the theocratic base year
+  useEffect(() => {
+    const loadLocked = async () => {
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session) {
+        setLockedMonthIndexes([]);
+        return;
+      }
+      try {
+        const baseYear = computeTheocraticYearBase(viewDate);
+        const reports = await fetchReports(baseYear);
+        setLockedMonthIndexes(reports.map((r) => r.month_index));
+      } catch {
+        // ignore silently
+      }
+    };
+    loadLocked();
+  }, [viewDate]);
+
+  const isDateLocked = (date: Date | null | undefined) => {
+    if (!date) return false;
+    const baseYear = computeTheocraticYearBase(date);
+    const idx = monthIndexFromDate(baseYear, date);
+    return lockedMonthIndexes.includes(idx);
+  };
+
   useEffect(() => {
     fetchEntries();
     const {
@@ -238,7 +300,16 @@ export default function CalendarView() {
   }, [fetchEntries]);
 
   const onSelectSlot = async (slot: SlotInfo) => {
-    setModalDate(slot.start as Date);
+    const date = slot.start as Date;
+    if (isDateLocked(date)) {
+      setSnackbar({
+        open: true,
+        message: "Mes cerrado: no puedes crear registros (informe generado)",
+        severity: "error",
+      });
+      return;
+    }
+    setModalDate(date);
     setModalType("preaching");
     setEditData(null);
     setModalOpen(true);
@@ -265,6 +336,15 @@ export default function CalendarView() {
   const handleEdit = () => {
     if (!menuEvent) return;
     const evt = menuEvent;
+    if (isDateLocked(evt.start as Date)) {
+      setSnackbar({
+        open: true,
+        message: "Mes cerrado: no puedes editar este registro",
+        severity: "error",
+      });
+      setMenuAnchor(null);
+      return;
+    }
     setModalType(evt.type);
     setModalDate(evt.start as Date);
     setEditData({
@@ -385,6 +465,24 @@ export default function CalendarView() {
       }}
     >
       <Stack spacing={2}>
+        {/* Encabezado invisible para lectores de pantalla con mes actual */}
+        <Box
+          component="h2"
+          id="calendar-heading"
+          sx={{
+            position: "absolute",
+            width: 1,
+            height: 1,
+            p: 0,
+            m: -1,
+            overflow: "hidden",
+            clip: "rect(0 0 0 0)",
+            whiteSpace: "nowrap",
+            border: 0,
+          }}
+        >
+          Calendario {metrics.monthLabel}
+        </Box>
         <Stack
           direction="row"
           flexWrap="wrap"
@@ -394,17 +492,29 @@ export default function CalendarView() {
         >
           <Stack direction="row" spacing={1} alignItems="center">
             <Tooltip title="Mes anterior">
-              <IconButton size="small" onClick={goPrevMonth}>
+              <IconButton
+                size="small"
+                onClick={goPrevMonth}
+                aria-label="Mes anterior (Alt + Flecha izquierda)"
+              >
                 <ArrowBackIosNewIcon fontSize="inherit" />
               </IconButton>
             </Tooltip>
             <Tooltip title="Hoy">
-              <IconButton size="small" onClick={goToday}>
+              <IconButton
+                size="small"
+                onClick={goToday}
+                aria-label="Ir a hoy (Alt + T)"
+              >
                 <TodayIcon fontSize="inherit" />
               </IconButton>
             </Tooltip>
             <Tooltip title="Mes siguiente">
-              <IconButton size="small" onClick={goNextMonth}>
+              <IconButton
+                size="small"
+                onClick={goNextMonth}
+                aria-label="Mes siguiente (Alt + Flecha derecha)"
+              >
                 <ArrowForwardIosIcon fontSize="inherit" />
               </IconButton>
             </Tooltip>
@@ -422,43 +532,42 @@ export default function CalendarView() {
             Vista mensual
           </Typography>
         </Stack>
-        <Stack
-          direction={{ xs: "column", sm: "row" }}
-          spacing={2}
-          alignItems="stretch"
-        >
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
           <Card sx={{ flex: 1, minWidth: 220 }} variant="outlined">
             <CardContent>
               <Typography variant="overline" sx={{ lineHeight: 1 }}>
-                Tiempo predicación
+                Tiempo predicación (mes)
               </Typography>
               <Typography variant="h6" fontWeight={600}>
                 {Math.floor(metrics.preachingMinutes / 60)}h{" "}
                 {metrics.preachingMinutes % 60}m
               </Typography>
-              <Chip size="small" label="Mes actual" sx={{ mt: 1 }} />
+              {isDateLocked(viewDate) && (
+                <Chip
+                  label="Mes cerrado"
+                  size="small"
+                  color="warning"
+                  sx={{ mt: 1, fontWeight: 600 }}
+                />
+              )}
             </CardContent>
           </Card>
           <Card sx={{ flex: 1, minWidth: 180 }} variant="outlined">
             <CardContent>
               <Typography variant="overline" sx={{ lineHeight: 1 }}>
-                Cursos bíblicos
+                Cursos bíblicos distintos
               </Typography>
               <Typography variant="h6" fontWeight={600}>
                 {metrics.distinctPersons}
               </Typography>
-              <Chip size="small" label="Personas" sx={{ mt: 1 }} />
-            </CardContent>
-          </Card>
-          <Card sx={{ flex: 1, minWidth: 160 }} variant="outlined">
-            <CardContent>
-              <Typography variant="overline" sx={{ lineHeight: 1 }}>
-                Sesiones
-              </Typography>
-              <Typography variant="h6" fontWeight={600}>
-                {events.length}
-              </Typography>
-              <Chip size="small" label="Total" sx={{ mt: 1 }} />
+              {isDateLocked(viewDate) && (
+                <Chip
+                  label="Bloqueado"
+                  size="small"
+                  color="warning"
+                  sx={{ mt: 1, fontWeight: 600 }}
+                />
+              )}
             </CardContent>
           </Card>
         </Stack>
@@ -478,6 +587,22 @@ export default function CalendarView() {
         </Box>
       )}
       <Box
+        role="region"
+        aria-labelledby="calendar-heading"
+        aria-describedby="calendar-instructions"
+        tabIndex={0}
+        onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => {
+          if (e.altKey && e.key === "ArrowLeft") {
+            e.preventDefault();
+            goPrevMonth();
+          } else if (e.altKey && e.key === "ArrowRight") {
+            e.preventDefault();
+            goNextMonth();
+          } else if (e.altKey && e.key.toLowerCase() === "t") {
+            e.preventDefault();
+            goToday();
+          }
+        }}
         sx={{
           flex: 1,
           minHeight: 0,
@@ -487,6 +612,10 @@ export default function CalendarView() {
             overflow: "hidden",
           },
           borderRadius: 2,
+          outline: "none",
+          "&:focus-visible": {
+            boxShadow: (t) => `0 0 0 3px ${t.palette.primary.main}40`,
+          },
         }}
       >
         <Calendar
@@ -501,6 +630,8 @@ export default function CalendarView() {
           messages={messages}
           date={viewDate}
           onNavigate={(d) => setViewDate(d as Date)}
+          view={currentView}
+          onView={(v) => setCurrentView(v)}
           eventPropGetter={(event) => {
             const isCourse = event.type === "bible_course";
             const style: React.CSSProperties = {};
@@ -511,9 +642,39 @@ export default function CalendarView() {
               style.fontWeight = 600;
             }
             const cls = isCourse ? "event-bible_course" : "event-preaching";
-            return { className: cls, style };
+            // Añadimos título accesible (aria-label a través de title para fallback) con tipo y duración si aplica
+            const labelParts: string[] = [];
+            if (event.type === "preaching") labelParts.push("Predicación");
+            if (event.type === "bible_course") labelParts.push("Curso bíblico");
+            if (typeof event.title === "string") labelParts.push(event.title);
+            if (!event.allDay) {
+              const start = event.start as Date;
+              const end = event.end as Date;
+              labelParts.push(
+                `${format(start, "HH:mm")} - ${format(end, "HH:mm")}`
+              );
+            }
+            return { className: cls, style, title: labelParts.join(" · ") };
           }}
         />
+        {/* Instrucciones ocultas para navegación por teclado */}
+        <Box
+          id="calendar-instructions"
+          sx={{
+            position: "absolute",
+            width: 1,
+            height: 1,
+            p: 0,
+            m: -1,
+            overflow: "hidden",
+            clip: "rect(0 0 0 0)",
+            whiteSpace: "nowrap",
+            border: 0,
+          }}
+        >
+          Navegación del calendario: Alt + Flecha izquierda/derecha para cambiar
+          de mes. Alt + T para ir a hoy. Tab para entrar a días y eventos.
+        </Box>
       </Box>
       <Menu
         anchorEl={menuAnchor}
