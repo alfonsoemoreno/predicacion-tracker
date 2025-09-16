@@ -15,7 +15,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Registro de Precursorado",
-  description: "Registro de tiempo de predicación y cursos bíblicos",
+  description:
+    "Registro de tiempo de ministerio, cursos bíblicos y servicio sagrado",
 };
 
 export default function RootLayout({

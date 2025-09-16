@@ -6,6 +6,7 @@ import Link from "next/link";
 import AppBar from "@mui/material/AppBar";
 import Toolbar from "@mui/material/Toolbar";
 import Typography from "@mui/material/Typography";
+import useMediaQuery from "@mui/material/useMediaQuery";
 import IconButton from "@mui/material/IconButton";
 import Button from "@mui/material/Button";
 import Menu from "@mui/material/Menu";
@@ -34,6 +35,8 @@ export default function Navbar() {
   const { mode, toggle } = useColorMode();
   const [navAnchor, setNavAnchor] = useState<null | HTMLElement>(null);
   const [userAnchor, setUserAnchor] = useState<null | HTMLElement>(null);
+  // Detect very small viewport widths where the full title would wrap
+  const tiny = useMediaQuery("(max-width:360px)");
 
   useEffect(() => {
     const { data: authListener } = supabase.auth.onAuthStateChange(
@@ -121,14 +124,31 @@ export default function Navbar() {
             fontWeight: 600,
             display: "flex",
             alignItems: "center",
-            gap: 1,
-            fontSize: { xs: 16, sm: 18 },
+            gap: 0.75,
+            fontSize: { xs: 15, sm: 18 },
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            maxWidth: { xs: 180, sm: 260 },
           }}
+          title="Registro de Precursorado"
         >
-          Registro de{" "}
-          <Box component="span" sx={{ fontWeight: 400, opacity: 0.6 }}>
-            Precursorado
-          </Box>
+          {tiny ? (
+            <>
+              <Box component="span" sx={{ fontWeight: 600 }}>
+                Precursorado
+              </Box>
+            </>
+          ) : (
+            <>
+              <Box component="span" sx={{ fontWeight: 600 }}>
+                Registro de
+              </Box>
+              <Box component="span" sx={{ fontWeight: 400, opacity: 0.6 }}>
+                Precursorado
+              </Box>
+            </>
+          )}
         </Typography>
         <Box
           sx={{

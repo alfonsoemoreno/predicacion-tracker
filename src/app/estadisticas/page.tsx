@@ -259,7 +259,7 @@ export default function EstadisticasPage() {
                   {metrics.combinedHoursYear.toFixed(1)}
                 </Typography>
                 <Typography variant="caption" sx={{ opacity: 0.7 }}>
-                  Predicación + Serv. sagrado
+                  Ministerio + Servicio sagrado
                 </Typography>
               </CardContent>
             </Card>
@@ -315,8 +315,8 @@ export default function EstadisticasPage() {
         <Divider />
         <Typography variant="body2" sx={{ opacity: 0.7 }}>
           Año teocrático: septiembre a agosto. La meta anual (600h) sólo cuenta
-          predicación. “Servicio sagrado” se informa aparte y también aparece el
-          total combinado para referencia.
+          el ministerio. “Servicio sagrado” se informa aparte y también aparece
+          el total combinado para referencia.
         </Typography>
       </Box>
       <Snackbar

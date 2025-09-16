@@ -260,10 +260,10 @@ export default function ActivityModal({
           sx={{ color: "primary.main", fontWeight: 600 }}
         >
           {localType === "preaching"
-            ? "predicación"
+            ? "Ministerio"
             : localType === "bible_course"
-            ? "curso bíblico"
-            : "servicio sagrado"}
+            ? "Curso bíblico"
+            : "Servicio sagrado"}
         </Typography>
         <Typography
           variant="caption"
@@ -291,9 +291,9 @@ export default function ActivityModal({
           size="small"
           sx={{ alignSelf: "flex-start" }}
         >
-          <ToggleButton value="preaching">Predicación</ToggleButton>
-          <ToggleButton value="bible_course">Curso</ToggleButton>
-          <ToggleButton value="sacred_service">Serv. sagrado</ToggleButton>
+          <ToggleButton value="preaching">Ministerio</ToggleButton>
+          <ToggleButton value="bible_course">Curso bíblico</ToggleButton>
+          <ToggleButton value="sacred_service">Servicio sagrado</ToggleButton>
         </ToggleButtonGroup>
 
         {(localType === "preaching" || localType === "sacred_service") && (

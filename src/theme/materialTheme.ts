@@ -5,24 +5,25 @@ import { deepmerge } from "@mui/utils";
 const base: ThemeOptions = {
   palette: {
     mode: "light",
+    // Pastel inspired palette: softer hues while maintaining AA contrast for text on main buttons
     primary: {
-      main: "#12b58b",
-      light: "#45caa2",
-      dark: "#0d9673",
-      contrastText: "#ffffff",
+      main: "#66c6b3", // soft teal
+      light: "#b6ede3",
+      dark: "#3d9f8e",
+      contrastText: "#10332d",
     },
     secondary: {
-      main: "#6366f1", // matches bible course event gradient base
-      light: "#818cf8",
-      dark: "#4f46e5",
-      contrastText: "#ffffff",
+      main: "#b8a6f2", // soft lavender
+      light: "#e2d9fb",
+      dark: "#8b7dc7",
+      contrastText: "#2c2540",
     },
-    error: { main: "#d32f2f" },
-    warning: { main: "#ed6c02" },
-    info: { main: "#0288d1" },
-    success: { main: "#2e7d32" },
+    error: { main: "#ef9a9a" }, // pastel red
+    warning: { main: "#ffcc80" },
+    info: { main: "#90caf9" },
+    success: { main: "#a5d6a7" },
     background: {
-      default: "#fafafa",
+      default: "#f7f9fa",
       paper: "#ffffff",
     },
   },
@@ -124,11 +125,26 @@ export const materialDark = createTheme(
   deepmerge(base, {
     palette: {
       mode: "dark",
-      background: {
-        default: "#0f1113",
-        paper: "#15181b",
+      primary: {
+        main: "#66c6b3",
+        light: "#4ca596",
+        dark: "#2e6f63",
+        contrastText: "#0d1e1b",
       },
-      primary: { main: "#12b58b" },
+      secondary: {
+        main: "#b8a6f2",
+        light: "#9385c4",
+        dark: "#5f537d",
+        contrastText: "#1d182b",
+      },
+      background: {
+        default: "#1c1f22",
+        paper: "#24282c",
+      },
+      error: { main: "#e57373" },
+      warning: { main: "#ffb74d" },
+      info: { main: "#64b5f6" },
+      success: { main: "#81c784" },
     },
   })
 );

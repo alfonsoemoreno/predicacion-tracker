@@ -44,7 +44,6 @@ const COLOR_OPTIONS = [
   "#E3E0F9", // lavender
   "#F9E0F2", // light magenta
   "#FFE4E1", // misty rose
-  "#E6F7FF", // powder blue
   "#F5E6CC", // beige
 ];
 

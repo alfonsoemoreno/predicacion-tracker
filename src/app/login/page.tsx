@@ -122,7 +122,7 @@ export default function LoginPage() {
           </Stack>
           <Typography variant="body2" sx={{ opacity: 0.8, mt: 1 }}>
             Accede con tu cuenta de Google para comenzar a registrar tus
-            actividades de predicación y cursos bíblicos.
+            actividades de ministerio, cursos bíblicos y servicio sagrado.
           </Typography>
           <Stack spacing={1}>
             <Button

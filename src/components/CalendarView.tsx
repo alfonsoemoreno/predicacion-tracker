@@ -220,7 +220,7 @@ const CustomMonthGrid: React.FC<CustomMonthGridProps> = ({
         flexDirection: "column",
         flex: 1,
         bgcolor: "background.paper",
-        borderRadius: 2,
+        borderRadius: 1,
         overflow: "hidden",
         border: (t) => `1px solid ${t.palette.divider}`,
       }}
@@ -228,9 +228,11 @@ const CustomMonthGrid: React.FC<CustomMonthGridProps> = ({
       <Box
         sx={{
           display: "grid",
-          gridTemplateColumns: "repeat(7,1fr)",
+          gridTemplateColumns: "repeat(7, 1fr)",
           borderBottom: (t) => `1px solid ${t.palette.divider}`,
           bgcolor: "background.default",
+          // Ensure no horizontal scroll / consistent widths
+          width: "100%",
         }}
       >
         {weekdayLabels.map((lbl) => (
@@ -328,11 +330,15 @@ const CustomMonthGrid: React.FC<CustomMonthGridProps> = ({
                     {dayEvents.map((ev) => {
                       const isCourse = ev.type === "bible_course";
                       const isSacred = ev.type === "sacred_service";
+                      // Uniform pastel backgrounds (same in light/dark): preaching, course, sacred
+                      const preachingBg = "#b6ede3"; // matches primary.light from light theme
+                      const courseBg = "#e2d9fb"; // matches secondary.light
+                      const sacredBg = "#E6F7FF"; // user requested
                       const bg = isCourse
-                        ? ev.person_color || "warning.light"
+                        ? ev.person_color || courseBg
                         : isSacred
-                        ? "secondary.light"
-                        : "primary.light";
+                        ? sacredBg
+                        : preachingBg;
                       const titleParts: string[] = [];
                       if (ev.type === "preaching")
                         titleParts.push("__ICON_MINISTERIO__");
@@ -356,7 +362,7 @@ const CustomMonthGrid: React.FC<CustomMonthGridProps> = ({
                               sx={{
                                 fontSize: 14,
                                 verticalAlign: "middle",
-                                color: "text.secondary",
+                                color: "#1a1a1a",
                               }}
                             />
                           );
@@ -367,7 +373,7 @@ const CustomMonthGrid: React.FC<CustomMonthGridProps> = ({
                               sx={{
                                 fontSize: 14,
                                 verticalAlign: "middle",
-                                color: "text.secondary",
+                                color: "#1a1a1a",
                               }}
                             />
                           );
@@ -378,7 +384,7 @@ const CustomMonthGrid: React.FC<CustomMonthGridProps> = ({
                               sx={{
                                 fontSize: 14,
                                 verticalAlign: "middle",
-                                color: "text.secondary",
+                                color: "#1a1a1a",
                               }}
                             />
                           );
@@ -410,6 +416,7 @@ const CustomMonthGrid: React.FC<CustomMonthGridProps> = ({
                             alignItems: "center",
                             gap: 0.5,
                             overflow: "hidden",
+                            color: isSacred ? "#1a1a1a" : "#1a1a1a",
                             "&:hover": { filter: "brightness(0.95)" },
                           }}
                           title={titleParts
@@ -489,7 +496,7 @@ const CustomWeekGrid: React.FC<CustomWeekGridProps> = ({
         flexDirection: "column",
         flex: 1,
         bgcolor: "background.paper",
-        borderRadius: 2,
+        borderRadius: 1,
         overflow: "hidden",
         border: (t) => `1px solid ${t.palette.divider}`,
       }}
@@ -568,9 +575,10 @@ const CustomWeekGrid: React.FC<CustomWeekGridProps> = ({
       <Box
         sx={{
           display: "grid",
-          gridTemplateColumns: "repeat(7,1fr)",
+          gridTemplateColumns: "repeat(7, 1fr)",
           flex: 1,
           minHeight: 0,
+          width: "100%",
         }}
       >
         {days.map((d, i) => {
@@ -623,35 +631,71 @@ const CustomWeekGrid: React.FC<CustomWeekGridProps> = ({
                       `${format(start, "HH:mm")} - ${format(end, "HH:mm")}`
                     );
                   }
+                  const preachingBg = "#b6ede3";
+                  const courseBg = "#e2d9fb";
+                  const sacredBg = "#E6F7FF";
                   const bg = isCourse
-                    ? ev.person_color || "warning.light"
+                    ? ev.person_color || courseBg
                     : isSacred
-                    ? "secondary.light"
-                    : "primary.light";
-                  const parts = labelParts.map((p, idx) => {
+                    ? sacredBg
+                    : preachingBg;
+                  // Pre-truncate very long raw title segment (not time) before rendering to reduce layout pressure
+                  const MAX_RAW_CHARS = 60;
+                  const parts = labelParts.map((raw, idx) => {
+                    const p =
+                      raw.length > MAX_RAW_CHARS
+                        ? raw.slice(0, MAX_RAW_CHARS) + "…"
+                        : raw;
                     if (p === "__ICON_MINISTERIO__")
                       return (
                         <BusinessCenterOutlinedIcon
                           key={idx}
-                          sx={{ fontSize: 16, color: "text.secondary" }}
+                          sx={{
+                            fontSize: 16,
+                            color: "#1a1a1a",
+                            flexShrink: 0,
+                          }}
                         />
                       );
                     if (p === "__ICON_CURSO__")
                       return (
                         <MenuBookOutlinedIcon
                           key={idx}
-                          sx={{ fontSize: 16, color: "text.secondary" }}
+                          sx={{
+                            fontSize: 16,
+                            color: "#1a1a1a",
+                            flexShrink: 0,
+                          }}
                         />
                       );
                     if (p === "__ICON_SAGRADO__")
                       return (
                         <ConstructionOutlinedIcon
                           key={idx}
-                          sx={{ fontSize: 16, color: "text.secondary" }}
+                          sx={{
+                            fontSize: 16,
+                            color: "#1a1a1a",
+                            flexShrink: 0,
+                          }}
                         />
                       );
+                    const spanStyle = {
+                      overflow: "hidden",
+                      textOverflow: "ellipsis" as const,
+                      minWidth: 0,
+                      flexShrink: 1,
+                      display: "-webkit-box",
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: "vertical",
+                      wordBreak: "break-word" as const,
+                      lineHeight: 1.1,
+                      width: "100%",
+                    } as React.CSSProperties & {
+                      WebkitLineClamp?: number;
+                      WebkitBoxOrient?: string;
+                    };
                     return (
-                      <span key={idx} style={{ whiteSpace: "nowrap" }}>
+                      <span key={idx} style={spanStyle}>
                         {p}
                       </span>
                     );
@@ -667,14 +711,21 @@ const CustomWeekGrid: React.FC<CustomWeekGridProps> = ({
                         p: 0.75,
                         borderRadius: 1,
                         bgcolor: bg,
-                        color: "text.primary",
+                        color: "#1a1a1a",
                         fontSize: 12,
                         fontWeight: 500,
                         boxShadow: (t) =>
                           `inset 0 0 0 1px ${t.palette.divider}`,
                         display: "flex",
-                        alignItems: "center",
-                        gap: 0.75,
+                        alignItems: "flex-start",
+                        gap: 0.5,
+                        minWidth: 0,
+                        overflow: "hidden",
+                        width: "100%",
+                        maxWidth: "100%",
+                        // Stack icons + text inline but let text wrap internally
+                        "& span": { display: "block" },
+                        "& *": { minWidth: 0 },
                         "&:hover": { filter: "brightness(0.95)" },
                       }}
                       title={labelParts
@@ -738,7 +789,7 @@ const CustomDayView: React.FC<CustomDayViewProps> = ({
         flexDirection: "column",
         flex: 1,
         bgcolor: "background.paper",
-        borderRadius: 2,
+        borderRadius: 1,
         overflow: "hidden",
         border: (t) => `1px solid ${t.palette.divider}`,
       }}
@@ -775,7 +826,7 @@ const CustomDayView: React.FC<CustomDayViewProps> = ({
               p: 2,
               border: "1px dashed",
               borderColor: "divider",
-              borderRadius: 2,
+              borderRadius: 1,
               textAlign: "center",
               fontSize: 13,
               color: "text.secondary",
@@ -789,18 +840,21 @@ const CustomDayView: React.FC<CustomDayViewProps> = ({
         {list.map((ev) => {
           const isCourse = ev.type === "bible_course";
           const isSacred = ev.type === "sacred_service";
+          const preachingBg = "#b6ede3";
+          const courseBg = "#e2d9fb";
+          const sacredBg = "#E6F7FF";
           const bg = isCourse
-            ? ev.person_color || "warning.light"
+            ? ev.person_color || courseBg
             : isSacred
-            ? "secondary.light"
-            : "primary.light";
+            ? sacredBg
+            : preachingBg;
           const s = ev.start as Date;
           const e = ev.end as Date;
           const labelParts: string[] = [];
           if (ev.type === "preaching")
-            labelParts.push("__ICON_MINISTERIO__ Ministerio");
-          if (isCourse) labelParts.push("__ICON_CURSO__ Curso bíblico");
-          if (isSacred) labelParts.push("__ICON_SAGRADO__ Servicio sagrado");
+            labelParts.push("__ICON_MINISTERIO__", "Ministerio");
+          if (isCourse) labelParts.push("__ICON_CURSO__", "Curso bíblico");
+          if (isSacred) labelParts.push("__ICON_SAGRADO__", "Servicio sagrado");
           if (typeof ev.title === "string") labelParts.push(ev.title);
           if (!ev.hideTime) {
             labelParts.push(`${format(s, "HH:mm")} - ${format(e, "HH:mm")}`);
@@ -808,17 +862,15 @@ const CustomDayView: React.FC<CustomDayViewProps> = ({
           const iconMap: Record<string, React.ReactNode> = {
             __ICON_MINISTERIO__: (
               <BusinessCenterOutlinedIcon
-                sx={{ fontSize: 18, color: "text.secondary" }}
+                sx={{ fontSize: 18, color: "#1a1a1a" }}
               />
             ),
             __ICON_CURSO__: (
-              <MenuBookOutlinedIcon
-                sx={{ fontSize: 18, color: "text.secondary" }}
-              />
+              <MenuBookOutlinedIcon sx={{ fontSize: 18, color: "#1a1a1a" }} />
             ),
             __ICON_SAGRADO__: (
               <ConstructionOutlinedIcon
-                sx={{ fontSize: 18, color: "text.secondary" }}
+                sx={{ fontSize: 18, color: "#1a1a1a" }}
               />
             ),
           };
@@ -839,6 +891,7 @@ const CustomDayView: React.FC<CustomDayViewProps> = ({
                 display: "flex",
                 flexDirection: "column",
                 gap: 0.5,
+                color: "#1a1a1a",
                 "&:hover": { filter: "brightness(0.95)" },
               }}
               title={descriptive.join(" · ")}
@@ -1088,11 +1141,10 @@ export default function CalendarView() {
       const baseTitle = (() => {
         if (row.type === "bible_course" && personName) return personName;
         if (row.title) return row.title;
-        if (row.type === "preaching")
-          return `Ministerio${rangeLabel} ${minutesLabel}`.trim();
+        if (row.type === "preaching") return `Ministerio`.trim();
         if (row.type === "sacred_service")
-          return `Serv. sagrado${rangeLabel}`.trim();
-        return `Curso ${minutesLabel}`.trim();
+          return `Servicio sagrado${rangeLabel}`.trim();
+        return `Curso bíblico ${minutesLabel}`.trim();
       })();
       return {
         id: row.id,
@@ -1424,7 +1476,7 @@ export default function CalendarView() {
             p: 2,
             border: "1px dashed",
             borderColor: "divider",
-            borderRadius: 2,
+            borderRadius: 1,
             fontSize: 14,
           }}
         >
@@ -1463,12 +1515,12 @@ export default function CalendarView() {
           },
           "& .rbc-month-view": {
             bgcolor: "background.paper",
-            borderRadius: 2,
+            borderRadius: 1,
             overflow: "hidden",
             flex: 1,
             minHeight: 0,
           },
-          borderRadius: 2,
+          borderRadius: 1,
           outline: "none",
           "&:focus-visible": {
             boxShadow: (t) => `0 0 0 3px ${t.palette.primary.main}40`,
