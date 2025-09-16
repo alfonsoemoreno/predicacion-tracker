@@ -1,10 +1,14 @@
 "use client";
 import { supabase } from "@/lib/supabaseClient";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 export default function Navbar() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
 
   useEffect(() => {
     const {
@@ -18,11 +22,18 @@ export default function Navbar() {
     return () => subscription.unsubscribe();
   }, []);
 
-  const signIn = async () => {
-    await supabase.auth.signInWithOAuth({ provider: "google" });
-  };
   const signOut = async () => {
-    await supabase.auth.signOut();
+    if (loggingOut) return;
+    setLoggingOut(true);
+    setError(null);
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      setError(error.message);
+      setLoggingOut(false);
+      return;
+    }
+    router.replace("/login");
+    setLoggingOut(false);
   };
 
   return (
@@ -49,12 +60,15 @@ export default function Navbar() {
             <span style={{ marginRight: 8, fontSize: 14, opacity: 0.8 }}>
               {userEmail}
             </span>
-            <button onClick={signOut}>Salir</button>
+            <button onClick={signOut} disabled={loggingOut}>
+              {loggingOut ? "Saliendo..." : "Salir"}
+            </button>
           </>
         ) : (
-          <button onClick={signIn}>Ingresar con Google</button>
+          <Link href="/login">Ingresar</Link>
         )}
       </div>
+      {error && <div style={{ color: "red", fontSize: 12 }}>{error}</div>}
     </nav>
   );
 }

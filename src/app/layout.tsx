@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Predicación Tracker",
+  title: "Registro de Precursorado",
   description: "Registro de tiempo de predicación y cursos bíblicos",
 };
 

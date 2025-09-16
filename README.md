@@ -12,7 +12,8 @@ Aplicación (Next.js + Supabase) para registrar minutos de predicación y cursos
 ### Características
 
 - Login con Google (OAuth via Supabase)
-- Calendario mensual/semana/día con eventos (predicación / curso bíblico)
+- Calendario mensual/semana/día con eventos (predicación con rango horario / curso bíblico all‑day)
+- Cálculo local de métricas del mes actual (total horas predicación + personas con curso)
 - CRUD básico de personas (estudios) y actividades
 - Policies RLS: cada usuario solo ve sus datos
 
@@ -45,7 +46,9 @@ create table if not exists public.activity_entries (
 	id uuid primary key default uuid_generate_v4(),
 	user_id uuid not null references auth.users(id) on delete cascade,
 	activity_date date not null,
-	minutes integer not null check (minutes > 0),
+	minutes integer not null check (minutes > 0), -- será nullable tras migración rango horario
+	start_time time, -- nuevo (migración)
+	end_time time,   -- nuevo (migración)
 	type activity_type not null,
 	person_id uuid references public.persons(id) on delete set null,
 	title text,
@@ -129,20 +132,64 @@ src/
 ## 5. Flujo de uso
 
 1. Inicia sesión con Google (navbar).
-2. En el calendario: selecciona un día (slot) para crear entrada (prompt minutos + tipo + título opcional).
-3. Click sobre un evento para editar minutos o borrar.
-4. Crea personas en la página Personas (asociación manual futura; hoy no aparece selector en formulario rápido del calendario).
+2. Selecciona un día en el calendario: se abre un modal para ingresar la actividad.
+	- Predicación: ingresar hora inicio y fin (se valida que fin > inicio y que no se solape con otra predicación del día).
+	- Curso bíblico: ingresar minutos y (opcional) escoger persona.
+3. Click en un evento para abrir el modal en modo edición o borrarlo.
+4. Gestiona personas en la página Personas.
 
 ---
 
 ## 6. Mejoras futuras sugeridas
 
 - Reemplazar prompts por formularios modales.
-- Selector de persona y notas en creación/edición de actividad.
-- Estadísticas: minutos por mes, desglose por tipo/persona.
+- Selector de persona y notas en creación/edición de actividad (UI amigable; hoy prompts).
+- Estadísticas servidor (consultas agregadas) y comparación meses.
 - Tests de componentes (Playwright / React Testing Library).
 - PWA + modo offline.
 - Formularios accesibles y diseño responsive mejorado.
+
+---
+
+## 9. Migración a rangos de tiempo (start_time / end_time)
+
+Ejecuta después de haber creado la tabla inicial si vienes de una versión previa:
+
+```sql
+begin;
+alter table public.activity_entries
+	add column if not exists start_time time,
+	add column if not exists end_time time,
+	alter column minutes drop not null;
+
+create or replace function public.compute_minutes_from_range() returns trigger as $$
+declare
+	dur integer;
+begin
+	if (NEW.start_time is not null and NEW.end_time is not null) then
+		dur := extract(epoch from (NEW.end_time - NEW.start_time)) / 60;
+		if dur < 0 then
+			raise exception 'end_time (%) must be after start_time (%)', NEW.end_time, NEW.start_time;
+		end if;
+		if NEW.minutes is null then
+			NEW.minutes := dur;
+		end if;
+	end if;
+	return NEW;
+end;
+$$ language plpgsql security definer;
+
+create or replace trigger trg_activity_entries_time_range
+	before insert or update on public.activity_entries
+	for each row execute function public.compute_minutes_from_range();
+commit;
+```
+
+Notas:
+
+- Para predicación ahora se ingresa hora inicio y fin; `minutes` se rellena automáticamente.
+- Para cursos bíblicos se mantiene entrada all‑day con minutos manuales.
+- Métricas mostradas se calculan en cliente (puede migrarse a SQL agregada más adelante).
 
 ---
 

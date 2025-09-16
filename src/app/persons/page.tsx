@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import Navbar from "@/components/Navbar";
+import AuthGuard from "@/components/AuthGuard";
 
 interface Person {
   id: string;
@@ -64,7 +65,7 @@ export default function PersonsPage() {
   };
 
   return (
-    <>
+    <AuthGuard>
       <Navbar />
       <main style={{ padding: 16 }}>
         <h1>Personas (cursos bíblicos)</h1>
@@ -106,6 +107,6 @@ export default function PersonsPage() {
           )}
         </ul>
       </main>
-    </>
+    </AuthGuard>
   );
 }
