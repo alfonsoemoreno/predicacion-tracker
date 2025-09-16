@@ -31,11 +31,13 @@ interface Props {
   onClose: () => void;
   onSaved: () => void;
   validateOverlap?: (range: { start: Date; end: Date; id?: string }) => boolean; // returns true if overlaps
+  existingCoursePersonIdsForDay?: string[]; // list of person_ids already used that day (excluding editing one)
 }
 
 interface Person {
   id: string;
   name: string;
+  color?: string | null;
 }
 
 export default function ActivityModal({
@@ -47,6 +49,7 @@ export default function ActivityModal({
   onClose,
   onSaved,
   validateOverlap,
+  existingCoursePersonIdsForDay,
 }: Props) {
   const [persons, setPersons] = useState<Person[]>([]);
   const [loadingPersons, setLoadingPersons] = useState(false);
@@ -55,7 +58,7 @@ export default function ActivityModal({
 
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
-  const [minutes, setMinutes] = useState("");
+  // minutes removed for bible_course flows (legacy field retained only in initialData if present)
   const [title, setTitle] = useState("");
   const [personId, setPersonId] = useState("");
 
@@ -66,7 +69,7 @@ export default function ActivityModal({
       setLoadingPersons(true);
       const { data, error } = await supabase
         .from("persons")
-        .select("id, name")
+        .select("id, name, color")
         .order("name");
       if (!error && data) setPersons(data as Person[]);
       setLoadingPersons(false);
@@ -85,13 +88,13 @@ export default function ActivityModal({
         if (initialData.end_time)
           setEndTime(initialData.end_time.substring(0, 5));
       }
-      if (initialData.minutes) setMinutes(String(initialData.minutes));
+      // ignore initialData.minutes (deprecated)
       if (initialData.title) setTitle(initialData.title);
       if (initialData.person_id) setPersonId(initialData.person_id);
     } else {
       setStartTime("");
       setEndTime("");
-      setMinutes(type === "bible_course" ? "30" : "");
+      // no minutes setup
       setTitle("");
       setPersonId("");
     }
@@ -118,9 +121,15 @@ export default function ActivityModal({
       const diff = toM(endTime) - toM(startTime);
       if (diff <= 0) return "La hora fin debe ser mayor que inicio";
     } else {
-      if (!minutes) return "Minutos requeridos";
-      const m = parseInt(minutes, 10);
-      if (!m || m <= 0) return "Minutos inválidos";
+      // person is now mandatory for course
+      if (!personId) return "Selecciona la persona";
+      if (
+        existingCoursePersonIdsForDay &&
+        existingCoursePersonIdsForDay.includes(personId) &&
+        (!initialData?.person_id || initialData.person_id !== personId)
+      ) {
+        return "Ya registraste un curso para esta persona este día";
+      }
     }
     return null;
   };
@@ -151,9 +160,15 @@ export default function ActivityModal({
       title?: string;
       person_id?: string;
     }
+    const toLocalDateString = (d: Date) => {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const da = String(d.getDate()).padStart(2, "0");
+      return `${y}-${m}-${da}`;
+    };
     const payload: Payload = {
       user_id: sessionData.session.user.id,
-      activity_date: date ? date.toISOString().slice(0, 10) : undefined,
+      activity_date: date ? toLocalDateString(date) : undefined,
       type: localType,
     };
 
@@ -161,10 +176,10 @@ export default function ActivityModal({
       payload.start_time = startTime + ":00";
       payload.end_time = endTime + ":00";
     } else {
-      payload.minutes = parseInt(minutes, 10);
-      if (personId) payload.person_id = personId;
+      // bible_course: only person
+      payload.person_id = personId;
     }
-    if (title.trim()) payload.title = title.trim();
+    if (localType === "preaching" && title.trim()) payload.title = title.trim();
 
     // Overlap check client side for preaching
     if (localType === "preaching" && date && startTime && endTime) {
@@ -206,7 +221,16 @@ export default function ActivityModal({
       dbError = error;
     }
     if (dbError) {
-      setError(dbError.message || "Error guardando");
+      const msgRaw = dbError.message || "Error guardando";
+      let friendly = msgRaw;
+      if (msgRaw.includes("OVERLAP_PREACHING")) {
+        friendly = "Se traslapa con otra actividad de predicación";
+      } else if (msgRaw.includes("RANGO_INCOMPLETO")) {
+        friendly = "Rango de horas incompleto";
+      } else if (msgRaw.includes("ux_activity_entries_course_person_day")) {
+        friendly = "Ya existe un curso para esa persona en ese día";
+      }
+      setError(friendly);
       setSaving(false);
       return;
     }
@@ -262,6 +286,7 @@ export default function ActivityModal({
               InputLabelProps={{ shrink: true }}
               fullWidth
               size="small"
+              autoFocus
             />
             <TextField
               label="Fin"
@@ -271,58 +296,50 @@ export default function ActivityModal({
               InputLabelProps={{ shrink: true }}
               fullWidth
               size="small"
+              autoFocus
             />
           </Stack>
         )}
 
         {localType === "bible_course" && (
-          <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
-            <TextField
-              label="Minutos"
-              type="number"
-              inputProps={{ min: 1 }}
-              value={minutes}
-              onChange={(e) => setMinutes(e.target.value)}
-              fullWidth
-              size="small"
-            />
-            <Autocomplete
-              options={persons}
-              loading={loadingPersons}
-              getOptionLabel={(o) => o.name}
-              value={persons.find((p) => p.id === personId) || null}
-              onChange={(_, val) => setPersonId(val?.id || "")}
-              renderInput={(params) => (
-                <TextField
-                  {...params}
-                  label="Persona (opcional)"
-                  size="small"
-                  InputProps={{
-                    ...params.InputProps,
-                    endAdornment: (
-                      <>
-                        {loadingPersons ? (
-                          <CircularProgress color="inherit" size={16} />
-                        ) : null}
-                        {params.InputProps.endAdornment}
-                      </>
-                    ),
-                  }}
-                />
-              )}
-              fullWidth
-            />
-          </Stack>
+          <Autocomplete
+            options={persons}
+            loading={loadingPersons}
+            getOptionLabel={(o) => o.name}
+            value={persons.find((p) => p.id === personId) || null}
+            onChange={(_, val) => setPersonId(val?.id || "")}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label="Persona"
+                size="small"
+                InputProps={{
+                  ...params.InputProps,
+                  endAdornment: (
+                    <>
+                      {loadingPersons ? (
+                        <CircularProgress color="inherit" size={16} />
+                      ) : null}
+                      {params.InputProps.endAdornment}
+                    </>
+                  ),
+                }}
+              />
+            )}
+            fullWidth
+          />
         )}
 
-        <TextField
-          label="Título (opcional)"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder="Ej: Servicio matutino"
-          fullWidth
-          size="small"
-        />
+        {localType === "preaching" && (
+          <TextField
+            label="Título (opcional)"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Ej: Servicio matutino"
+            fullWidth
+            size="small"
+          />
+        )}
 
         {error && (
           <Alert severity="error" variant="outlined" icon={false}>

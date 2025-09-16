@@ -24,6 +24,11 @@ import ArrowForwardIosIcon from "@mui/icons-material/ArrowForwardIos";
 import TodayIcon from "@mui/icons-material/Today";
 import Snackbar from "@mui/material/Snackbar";
 import Alert from "@mui/material/Alert";
+import Menu from "@mui/material/Menu";
+import MenuItem from "@mui/material/MenuItem";
+import ListItemIcon from "@mui/material/ListItemIcon";
+import EditIcon from "@mui/icons-material/Edit";
+import DeleteIcon from "@mui/icons-material/Delete";
 
 // Localizador para react-big-calendar usando date-fns en español.
 const locales = { es } as const;
@@ -41,6 +46,8 @@ interface EntryEvent extends RBCEvent {
   minutes: number; // store 0 if null in DB
   type: "preaching" | "bible_course";
   person_id?: string | null;
+  person_name?: string | null;
+  person_color?: string | null;
 }
 
 export default function CalendarView() {
@@ -67,6 +74,8 @@ export default function CalendarView() {
     message: string;
     severity: "success" | "error";
   }>({ open: false, message: "", severity: "success" });
+  const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
+  const [menuEvent, setMenuEvent] = useState<EntryEvent | null>(null);
 
   const fetchEntries = useCallback(async () => {
     setLoading(true);
@@ -80,7 +89,7 @@ export default function CalendarView() {
     const { data, error } = await supabase
       .from("activity_entries")
       .select(
-        "id, activity_date, minutes, type, title, person_id, start_time, end_time"
+        "id, activity_date, minutes, type, title, person_id, start_time, end_time, persons:person_id ( name, color )"
       )
       .order("activity_date", { ascending: true });
     if (error) {
@@ -97,8 +106,36 @@ export default function CalendarView() {
       person_id?: string | null;
       start_time?: string | null;
       end_time?: string | null;
+      persons?: { name: string | null; color: string | null } | null;
     };
-    const mapped: EntryEvent[] = ((data as Row[] | null) ?? []).map((row) => {
+    const raw = (data as unknown[] | null) ?? [];
+    interface RawRow {
+      id: string;
+      activity_date: string;
+      minutes: number | null;
+      type: string;
+      title: string | null;
+      person_id?: string | null;
+      start_time?: string | null;
+      end_time?: string | null;
+      persons?:
+        | { name: string | null; color: string | null }[]
+        | { name: string | null; color: string | null }
+        | null;
+    }
+    const mapped: EntryEvent[] = raw.map((rUnknown) => {
+      const r = rUnknown as RawRow;
+      const row: Row = {
+        id: r.id,
+        activity_date: r.activity_date,
+        minutes: r.minutes,
+        type: r.type,
+        title: r.title,
+        person_id: r.person_id,
+        start_time: r.start_time,
+        end_time: r.end_time,
+        persons: Array.isArray(r.persons) ? r.persons[0] : r.persons,
+      };
       const [y, m, d] = row.activity_date.split("-").map(Number);
 
       const parseTime = (t?: string | null) => {
@@ -140,19 +177,26 @@ export default function CalendarView() {
             )}`
           : "";
 
+      const personName = row.persons?.name || null;
+      const personColor = row.persons?.color || null;
+      const baseTitle =
+        row.type === "bible_course" && personName
+          ? personName
+          : row.title ||
+            (row.type === "preaching"
+              ? `Predicación${rangeLabel} ${minutesLabel}`.trim()
+              : `Curso ${minutesLabel}`.trim());
       return {
         id: row.id,
-        title:
-          row.title ||
-          (row.type === "preaching"
-            ? `Predicación${rangeLabel} ${minutesLabel}`.trim()
-            : `Curso ${minutesLabel}`.trim()),
+        title: baseTitle,
         start: startDate,
         end: endDate,
         allDay,
         minutes: row.minutes ?? 0,
         type: row.type as EntryEvent["type"],
         person_id: row.person_id,
+        person_name: personName,
+        person_color: personColor,
       };
     });
     setEvents(mapped);
@@ -200,44 +244,66 @@ export default function CalendarView() {
     setModalOpen(true);
   };
 
-  const onSelectEvent = async (evt: EntryEvent) => {
-    const action = prompt("Escribe 'e' para editar, 'd' para borrar:");
-    if (action === "d") {
-      const { error } = await supabase
-        .from("activity_entries")
-        .delete()
-        .eq("id", evt.id);
-      if (error) {
-        setSnackbar({
-          open: true,
-          message: error.message || "Error eliminando",
-          severity: "error",
-        });
-      } else {
-        fetchEntries();
-        setSnackbar({
-          open: true,
-          message: "Registro eliminado",
-          severity: "success",
-        });
-      }
-    } else if (action === "e") {
-      setModalType(evt.type);
-      setModalDate(evt.start as Date);
-      setEditData({
-        id: evt.id,
-        start_time: evt.allDay
-          ? undefined
-          : format(evt.start as Date, "HH:mm") + ":00",
-        end_time: evt.allDay
-          ? undefined
-          : format(evt.end as Date, "HH:mm") + ":00",
-        minutes: evt.minutes,
-        title: typeof evt.title === "string" ? evt.title : undefined,
-        person_id: evt.person_id,
+  const getExistingCoursePersonIdsForDay = () => {
+    if (!modalDate) return [] as string[];
+    return events
+      .filter(
+        (e) =>
+          e.type === "bible_course" &&
+          e.person_id &&
+          (e.start as Date).toDateString() === modalDate.toDateString() &&
+          (!editData || editData.id !== e.id)
+      )
+      .map((e) => e.person_id!) as string[];
+  };
+  const onSelectEvent = (evt: EntryEvent, e: React.SyntheticEvent) => {
+    // open context menu anchored to click
+    setMenuEvent(evt);
+    setMenuAnchor(e.currentTarget as HTMLElement);
+  };
+
+  const handleEdit = () => {
+    if (!menuEvent) return;
+    const evt = menuEvent;
+    setModalType(evt.type);
+    setModalDate(evt.start as Date);
+    setEditData({
+      id: evt.id,
+      start_time: evt.allDay
+        ? undefined
+        : format(evt.start as Date, "HH:mm") + ":00",
+      end_time: evt.allDay
+        ? undefined
+        : format(evt.end as Date, "HH:mm") + ":00",
+      minutes: evt.minutes,
+      title: typeof evt.title === "string" ? evt.title : undefined,
+      person_id: evt.person_id,
+    });
+    setModalOpen(true);
+    setMenuAnchor(null);
+  };
+
+  const handleDelete = async () => {
+    if (!menuEvent) return;
+    const { error } = await supabase
+      .from("activity_entries")
+      .delete()
+      .eq("id", menuEvent.id);
+    if (error) {
+      setSnackbar({
+        open: true,
+        message: error.message || "Error eliminando",
+        severity: "error",
       });
-      setModalOpen(true);
+    } else {
+      fetchEntries();
+      setSnackbar({
+        open: true,
+        message: "Registro eliminado",
+        severity: "success",
+      });
     }
+    setMenuAnchor(null);
   };
 
   const validateOverlap = ({
@@ -430,20 +496,45 @@ export default function CalendarView() {
           endAccessor="end"
           selectable
           onSelectSlot={onSelectSlot}
-          onSelectEvent={onSelectEvent}
+          onSelectEvent={(event, e) => onSelectEvent(event as EntryEvent, e)}
           views={["month", "week", "day"]}
           messages={messages}
           date={viewDate}
           onNavigate={(d) => setViewDate(d as Date)}
           eventPropGetter={(event) => {
-            const cls =
-              event.type === "preaching"
-                ? "event-preaching"
-                : "event-bible_course";
-            return { className: cls };
+            const isCourse = event.type === "bible_course";
+            const style: React.CSSProperties = {};
+            if (isCourse && event.person_color) {
+              style.background = event.person_color;
+              style.border = "1px solid rgba(0,0,0,0.15)";
+              style.color = "#222";
+              style.fontWeight = 600;
+            }
+            const cls = isCourse ? "event-bible_course" : "event-preaching";
+            return { className: cls, style };
           }}
         />
       </Box>
+      <Menu
+        anchorEl={menuAnchor}
+        open={Boolean(menuAnchor)}
+        onClose={() => setMenuAnchor(null)}
+        anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
+        transformOrigin={{ vertical: "top", horizontal: "left" }}
+      >
+        <MenuItem onClick={handleEdit} aria-label="Editar actividad">
+          <ListItemIcon>
+            <EditIcon fontSize="small" />
+          </ListItemIcon>
+          Editar
+        </MenuItem>
+        <MenuItem onClick={handleDelete} aria-label="Eliminar actividad">
+          <ListItemIcon>
+            <DeleteIcon fontSize="small" />
+          </ListItemIcon>
+          Eliminar
+        </MenuItem>
+      </Menu>
       <ActivityModal
         open={modalOpen}
         mode={editData ? "edit" : "create"}
@@ -463,12 +554,14 @@ export default function CalendarView() {
           });
         }}
         validateOverlap={validateOverlap}
+        existingCoursePersonIdsForDay={getExistingCoursePersonIdsForDay()}
       />
       <Snackbar
         open={snackbar.open}
         autoHideDuration={4000}
         onClose={() => setSnackbar((s) => ({ ...s, open: false }))}
         anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+        ContentProps={{ role: "status", "aria-live": "polite" }}
       >
         <Alert
           onClose={() => setSnackbar((s) => ({ ...s, open: false }))}

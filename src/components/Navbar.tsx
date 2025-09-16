@@ -24,6 +24,8 @@ import MenuIcon from "@mui/icons-material/Menu";
 
 export default function Navbar() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [userName, setUserName] = useState<string | null>(null);
+  const [userAvatar, setUserAvatar] = useState<string | null>(null);
   const [loggingOut, setLoggingOut] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
@@ -32,15 +34,39 @@ export default function Navbar() {
   const [userAnchor, setUserAnchor] = useState<null | HTMLElement>(null);
 
   useEffect(() => {
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_e, session) => {
-      setUserEmail(session?.user?.email ?? null);
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      (_e, session) => {
+        const user = session?.user;
+        setUserEmail(user?.email ?? null);
+        setUserName(
+          (user?.user_metadata?.full_name as string) ||
+            (user?.user_metadata?.name as string) ||
+            user?.email?.split("@")[0] ||
+            null
+        );
+        setUserAvatar(
+          (user?.user_metadata?.avatar_url as string) ||
+            (user?.user_metadata?.picture as string) ||
+            null
+        );
+      }
+    );
+    supabase.auth.getSession().then(({ data }) => {
+      const user = data.session?.user;
+      setUserEmail(user?.email ?? null);
+      setUserName(
+        (user?.user_metadata?.full_name as string) ||
+          (user?.user_metadata?.name as string) ||
+          user?.email?.split("@")[0] ||
+          null
+      );
+      setUserAvatar(
+        (user?.user_metadata?.avatar_url as string) ||
+          (user?.user_metadata?.picture as string) ||
+          null
+      );
     });
-    supabase.auth
-      .getSession()
-      .then(({ data }) => setUserEmail(data.session?.user?.email ?? null));
-    return () => subscription.unsubscribe();
+    return () => authListener.subscription.unsubscribe();
   }, []);
 
   const signOut = async () => {
@@ -95,9 +121,9 @@ export default function Navbar() {
             fontSize: { xs: 16, sm: 18 },
           }}
         >
-          Predicación{" "}
+          Registro de{" "}
           <Box component="span" sx={{ fontWeight: 400, opacity: 0.6 }}>
-            Tracker
+            Precursorado
           </Box>
         </Typography>
         <Box
@@ -138,7 +164,7 @@ export default function Navbar() {
         </Tooltip>
         {userEmail ? (
           <>
-            <Tooltip title={userEmail}>
+            <Tooltip title={userName || userEmail}>
               <Avatar
                 onClick={(e) => setUserAnchor(e.currentTarget)}
                 sx={{
@@ -148,8 +174,10 @@ export default function Navbar() {
                   bgcolor: "primary.main",
                   fontSize: 14,
                 }}
+                src={userAvatar || undefined}
+                alt={userName || userEmail || "Usuario"}
               >
-                {userEmail.charAt(0).toUpperCase()}
+                {(userName || userEmail || "?").charAt(0).toUpperCase()}
               </Avatar>
             </Tooltip>
             <Menu
@@ -159,14 +187,25 @@ export default function Navbar() {
               anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
               transformOrigin={{ vertical: "top", horizontal: "right" }}
             >
-              <Box sx={{ px: 2, py: 1.5 }}>
+              <Box sx={{ px: 2, py: 1.5, maxWidth: 240 }}>
                 <Typography
                   variant="caption"
                   sx={{ display: "block", opacity: 0.7 }}
                 >
                   Sesión
                 </Typography>
-                <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                {userName && (
+                  <Typography
+                    variant="body2"
+                    sx={{ fontWeight: 600, lineHeight: 1.3 }}
+                  >
+                    {userName}
+                  </Typography>
+                )}
+                <Typography
+                  variant="caption"
+                  sx={{ opacity: 0.7, wordBreak: "break-all" }}
+                >
                   {userEmail}
                 </Typography>
               </Box>
