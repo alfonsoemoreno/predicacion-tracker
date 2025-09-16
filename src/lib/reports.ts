@@ -87,6 +87,9 @@ export interface GenerateReportResult {
 
 export async function generateMonthlyReportSequential(baseYear: number) {
   // Fetch existing reports to know next index & carried_in
+  const { data: sessionData } = await supabase.auth.getSession();
+  const userId = sessionData.session?.user.id;
+  if (!userId) throw new Error("No autenticado");
   const reports = await fetchReports(baseYear);
   const nextIndex = reports.length; // sequential enforcement
   if (nextIndex > 11) throw new Error("Todos los meses ya están cerrados");
@@ -101,6 +104,7 @@ export async function generateMonthlyReportSequential(baseYear: number) {
   const leftover = effective % 60;
   const { start, end } = monthRange(baseYear, nextIndex);
   const payload = {
+    user_id: userId,
     period_year: baseYear,
     month_index: nextIndex,
     period_start: start.toISOString().slice(0, 10),
