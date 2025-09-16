@@ -1,21 +1,67 @@
 ## Predicación Tracker
 
-Aplicación (Next.js + Supabase) para registrar minutos de predicación y cursos bíblicos sobre un calendario.
+Registro sencillo y moderno (Material Design) de actividades de predicación y cursos bíblicos con autenticación Google y visualización en calendario.
 
-### Stack
+### Stack Actual
 
-- Next.js (App Router)
-- React 19 + TypeScript
-- Supabase (Auth + Postgres + RLS)
-- `react-big-calendar` + `date-fns` (i18n español)
+- Next.js (App Router) + React 19 + TypeScript
+- Supabase (Auth, Postgres, RLS, Realtime)
+- Material UI v6 (theming claro/oscuro persistente)
+- `react-big-calendar` + `date-fns` (locale ES)
 
-### Características
+### Principales Características
 
-- Login con Google (OAuth via Supabase)
-- Calendario mensual/semana/día con eventos (predicación con rango horario / curso bíblico all‑day)
-- Cálculo local de métricas del mes actual (total horas predicación + personas con curso)
-- CRUD básico de personas (estudios) y actividades
-- Policies RLS: cada usuario solo ve sus datos
+- Autenticación con Google (Supabase OAuth)
+- Calendario mensual / semana / día con soporte de rangos horarios para predicación
+- Modal Material UI para crear / editar actividades (predicación o curso bíblico)
+- Validación de solapamientos para rangos de predicación en el día
+- Cursos bíblicos asociados opcionalmente a una persona (estudio)
+- Métricas mensuales: minutos totales de predicación, cursos (personas distintas), sesiones
+- Feedback con Snackbar (creación, actualización, eliminación)
+- Realtime (suscripción a cambios en `activity_entries`)
+- Modo claro/oscuro (persistido en localStorage + preferencia del sistema)
+- Policies RLS: aislamiento por usuario
+
+### Cambios Recientes Importantes (Migración)
+
+Se migró de un diseño previo con Tailwind + Radix UI a Material UI por:
+
+- Consistencia visual inmediata (Material Design tokens predefinidos)
+- Reducción de CSS personalizado y utilidades ad-hoc
+- Mejor accesibilidad y estados interactivos listos
+- Simplificación de mantenimiento (un solo sistema de componentes)
+
+La limpieza incluyó: eliminación de Tailwind, Radix y componentes custom (`ui/Button`, `ui/Card`, `ui/MetricPill`), consolidación de estilos de eventos en el theme (`MuiCssBaseline`).
+
+### Theming
+
+`src/theme/materialTheme.ts` define dos temas (light/dark) con paleta primaria (#12b58b) y secundaria (#6366f1). Se aplican overrides a:
+
+- `MuiButton`, `MuiPaper`, `MuiDialog`, `MuiChip` (bordes y tipografía)
+- Estilos globales para clases de eventos de `react-big-calendar` (`.event-preaching`, `.event-bible_course`), hoy y off‑range.
+
+Persistencia de modo: en `layout.tsx` se lee `localStorage` (`color-mode`) o preferencia del sistema (`prefers-color-scheme`).
+
+### Flujo de Uso
+
+1. Inicia sesión con Google.
+2. Haz click en un día vacío para crear actividad (por defecto predicación).
+3. Elige tipo (predicación / curso) vía toggle en el modal.
+4. Predicación: ingresa hora inicio y fin (valida fin > inicio y no solapar).
+5. Curso: ingresa minutos y selecciona persona (opcional).
+6. Click en un evento para editar o borrar (prompt actual para acción, mejorable a menú contextual).
+7. Observa métricas mensuales arriba del calendario.
+
+### Próximas Mejoras Sugeridas
+
+- Reemplazar prompt de editar/borrar por menú contextual o actions en tooltip
+- CRUD visual de personas (pantalla dedicada o Autocomplete con creación rápida)
+- Filtros por tipo / persona en calendario
+- Exportación (CSV / PDF) de métricas mensuales
+- Cálculo/agrupación de estadísticas en SQL (evitar sobrecarga cliente)
+- PWA + offline (cache de últimas actividades)
+- Tests (unit + integration + e2e)
+- Accesibilidad adicional (navegación teclado completa en modal & calendario)
 
 ---
 
@@ -129,29 +175,7 @@ src/
 
 ---
 
-## 5. Flujo de uso
-
-1. Inicia sesión con Google (navbar).
-2. Selecciona un día en el calendario: se abre un modal para ingresar la actividad.
-	- Predicación: ingresar hora inicio y fin (se valida que fin > inicio y que no se solape con otra predicación del día).
-	- Curso bíblico: ingresar minutos y (opcional) escoger persona.
-3. Click en un evento para abrir el modal en modo edición o borrarlo.
-4. Gestiona personas en la página Personas.
-
----
-
-## 6. Mejoras futuras sugeridas
-
-- Reemplazar prompts por formularios modales.
-- Selector de persona y notas en creación/edición de actividad (UI amigable; hoy prompts).
-- Estadísticas servidor (consultas agregadas) y comparación meses.
-- Tests de componentes (Playwright / React Testing Library).
-- PWA + modo offline.
-- Formularios accesibles y diseño responsive mejorado.
-
----
-
-## 9. Migración a rangos de tiempo (start_time / end_time)
+## 5. Migración a rangos de tiempo (start_time / end_time)
 
 Ejecuta después de haber creado la tabla inicial si vienes de una versión previa:
 
@@ -193,7 +217,7 @@ Notas:
 
 ---
 
-## 7. Despliegue en Vercel
+## 6. Despliegue en Vercel
 
 1. Haz push del repositorio a GitHub.
 2. Importa el repo en Vercel.
@@ -202,10 +226,10 @@ Notas:
 
 ---
 
-## 8. Licencia
+## 7. Licencia
 
 Uso personal / educativo. Ajusta según tus necesidades.
 
 ---
 
-¡Listo! Cualquier mejora puedes abrir un issue o continuar extendiendo.
+¡Listo! Siente libertad de extender. Para nuevas contribuciones: añade tests y respeta el tema MUI existente.

@@ -3,12 +3,33 @@ import { supabase } from "@/lib/supabaseClient";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import AppBar from "@mui/material/AppBar";
+import Toolbar from "@mui/material/Toolbar";
+import Typography from "@mui/material/Typography";
+import IconButton from "@mui/material/IconButton";
+import Button from "@mui/material/Button";
+import Menu from "@mui/material/Menu";
+import MenuItem from "@mui/material/MenuItem";
+import Box from "@mui/material/Box";
+import Tooltip from "@mui/material/Tooltip";
+import Avatar from "@mui/material/Avatar";
+import Divider from "@mui/material/Divider";
+import { useColorMode } from "@/app/theme-client";
+import LightModeIcon from "@mui/icons-material/LightMode";
+import DarkModeIcon from "@mui/icons-material/DarkMode";
+import LogoutIcon from "@mui/icons-material/Logout";
+import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
+import PeopleIcon from "@mui/icons-material/People";
+import MenuIcon from "@mui/icons-material/Menu";
 
 export default function Navbar() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [loggingOut, setLoggingOut] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
+  const { mode, toggle } = useColorMode();
+  const [navAnchor, setNavAnchor] = useState<null | HTMLElement>(null);
+  const [userAnchor, setUserAnchor] = useState<null | HTMLElement>(null);
 
   useEffect(() => {
     const {
@@ -36,39 +57,172 @@ export default function Navbar() {
     setLoggingOut(false);
   };
 
+  const openNav = Boolean(navAnchor);
+  const openUser = Boolean(userAnchor);
+
   return (
-    <nav
-      style={{
-        display: "flex",
-        gap: 16,
-        alignItems: "center",
-        padding: "12px 20px",
-        borderBottom: "1px solid #eee",
-        background: "#fafafa",
+    <AppBar
+      position="sticky"
+      color="transparent"
+      elevation={0}
+      sx={{
+        backdropFilter: "blur(14px)",
+        bgcolor: (t) =>
+          t.palette.mode === "light"
+            ? "rgba(255,255,255,0.85)"
+            : "rgba(21,24,27,0.7)",
+        borderBottom: (t) => `1px solid ${t.palette.divider}`,
       }}
     >
-      <strong style={{ flex: 1 }}>Predicación Tracker</strong>
-      <Link href="/" style={{ textDecoration: "none" }}>
-        Calendario
-      </Link>
-      <Link href="/persons" style={{ textDecoration: "none" }}>
-        Personas
-      </Link>
-      <div>
+      <Toolbar sx={{ gap: 2, minHeight: 64 }}>
+        <Box sx={{ display: { xs: "flex", md: "none" } }}>
+          <IconButton
+            color="inherit"
+            edge="start"
+            aria-label="menu"
+            onClick={(e) => setNavAnchor(e.currentTarget)}
+          >
+            <MenuIcon />
+          </IconButton>
+        </Box>
+        <Typography
+          variant="h6"
+          sx={{
+            fontWeight: 600,
+            display: "flex",
+            alignItems: "center",
+            gap: 1,
+            fontSize: { xs: 16, sm: 18 },
+          }}
+        >
+          Predicación{" "}
+          <Box component="span" sx={{ fontWeight: 400, opacity: 0.6 }}>
+            Tracker
+          </Box>
+        </Typography>
+        <Box
+          sx={{
+            display: { xs: "none", md: "flex" },
+            gap: 1,
+            alignItems: "center",
+          }}
+        >
+          <Button
+            startIcon={<CalendarMonthIcon />}
+            component={Link as unknown as React.ElementType}
+            href="/"
+            color="inherit"
+            sx={{ fontWeight: 500 }}
+          >
+            Calendario
+          </Button>
+          <Button
+            startIcon={<PeopleIcon />}
+            component={Link as unknown as React.ElementType}
+            href="/persons"
+            color="inherit"
+            sx={{ fontWeight: 500 }}
+          >
+            Personas
+          </Button>
+        </Box>
+        <Box sx={{ flexGrow: 1 }} />
+        <Tooltip title={mode === "light" ? "Modo oscuro" : "Modo claro"}>
+          <IconButton
+            color="inherit"
+            onClick={toggle}
+            aria-label="Cambiar tema"
+          >
+            {mode === "light" ? <DarkModeIcon /> : <LightModeIcon />}
+          </IconButton>
+        </Tooltip>
         {userEmail ? (
           <>
-            <span style={{ marginRight: 8, fontSize: 14, opacity: 0.8 }}>
-              {userEmail}
-            </span>
-            <button onClick={signOut} disabled={loggingOut}>
-              {loggingOut ? "Saliendo..." : "Salir"}
-            </button>
+            <Tooltip title={userEmail}>
+              <Avatar
+                onClick={(e) => setUserAnchor(e.currentTarget)}
+                sx={{
+                  cursor: "pointer",
+                  width: 34,
+                  height: 34,
+                  bgcolor: "primary.main",
+                  fontSize: 14,
+                }}
+              >
+                {userEmail.charAt(0).toUpperCase()}
+              </Avatar>
+            </Tooltip>
+            <Menu
+              anchorEl={userAnchor}
+              open={openUser}
+              onClose={() => setUserAnchor(null)}
+              anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+              transformOrigin={{ vertical: "top", horizontal: "right" }}
+            >
+              <Box sx={{ px: 2, py: 1.5 }}>
+                <Typography
+                  variant="caption"
+                  sx={{ display: "block", opacity: 0.7 }}
+                >
+                  Sesión
+                </Typography>
+                <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                  {userEmail}
+                </Typography>
+              </Box>
+              <Divider />
+              <MenuItem
+                onClick={() => {
+                  setUserAnchor(null);
+                  signOut();
+                }}
+                disabled={loggingOut}
+              >
+                <LogoutIcon fontSize="small" style={{ marginRight: 8 }} />
+                {loggingOut ? "Saliendo..." : "Salir"}
+              </MenuItem>
+            </Menu>
           </>
         ) : (
-          <Link href="/login">Ingresar</Link>
+          <Button
+            variant="contained"
+            color="primary"
+            component={Link as unknown as React.ElementType}
+            href="/login"
+          >
+            Ingresar
+          </Button>
         )}
-      </div>
-      {error && <div style={{ color: "red", fontSize: 12 }}>{error}</div>}
-    </nav>
+        <Menu
+          anchorEl={navAnchor}
+          open={openNav}
+          onClose={() => setNavAnchor(null)}
+          anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
+          transformOrigin={{ vertical: "top", horizontal: "left" }}
+          sx={{ display: { xs: "block", md: "none" } }}
+        >
+          <MenuItem
+            component={Link as unknown as React.ElementType}
+            href="/"
+            onClick={() => setNavAnchor(null)}
+          >
+            <CalendarMonthIcon fontSize="small" style={{ marginRight: 8 }} />{" "}
+            Calendario
+          </MenuItem>
+          <MenuItem
+            component={Link as unknown as React.ElementType}
+            href="/persons"
+            onClick={() => setNavAnchor(null)}
+          >
+            <PeopleIcon fontSize="small" style={{ marginRight: 8 }} /> Personas
+          </MenuItem>
+        </Menu>
+      </Toolbar>
+      {error && (
+        <Typography variant="caption" color="error" sx={{ px: 2, pb: 1 }}>
+          {error}
+        </Typography>
+      )}
+    </AppBar>
   );
 }

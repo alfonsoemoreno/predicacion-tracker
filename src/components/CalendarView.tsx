@@ -11,6 +11,19 @@ import { es } from "date-fns/locale/es";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import ActivityModal from "./ActivityModal";
+import Box from "@mui/material/Box";
+import Stack from "@mui/material/Stack";
+import IconButton from "@mui/material/IconButton";
+import Typography from "@mui/material/Typography";
+import Card from "@mui/material/Card";
+import CardContent from "@mui/material/CardContent";
+import Chip from "@mui/material/Chip";
+import Tooltip from "@mui/material/Tooltip";
+import ArrowBackIosNewIcon from "@mui/icons-material/ArrowBackIosNew";
+import ArrowForwardIosIcon from "@mui/icons-material/ArrowForwardIos";
+import TodayIcon from "@mui/icons-material/Today";
+import Snackbar from "@mui/material/Snackbar";
+import Alert from "@mui/material/Alert";
 
 // Localizador para react-big-calendar usando date-fns en español.
 const locales = { es } as const;
@@ -34,11 +47,7 @@ export default function CalendarView() {
   const [events, setEvents] = useState<EntryEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [monthMetrics, setMonthMetrics] = useState<{
-    month: string;
-    preachingMinutes: number;
-    distinctPersons: number;
-  } | null>(null);
+  const [viewDate, setViewDate] = useState<Date>(new Date());
   const [modalOpen, setModalOpen] = useState(false);
   const [modalType, setModalType] = useState<"preaching" | "bible_course">(
     "preaching"
@@ -53,6 +62,11 @@ export default function CalendarView() {
     person_id?: string | null;
   }
   const [editData, setEditData] = useState<EditData | null>(null);
+  const [snackbar, setSnackbar] = useState<{
+    open: boolean;
+    message: string;
+    severity: "success" | "error";
+  }>({ open: false, message: "", severity: "success" });
 
   const fetchEntries = useCallback(async () => {
     setLoading(true);
@@ -142,30 +156,6 @@ export default function CalendarView() {
       };
     });
     setEvents(mapped);
-    // Calculate metrics for current month (client-side for now)
-    const now = new Date();
-    const currentMonth = now.getMonth();
-    const currentYear = now.getFullYear();
-    const preachingMinutes = mapped
-      .filter((e) => e.type === "preaching")
-      .filter((e) => (e.start as Date).getMonth() === currentMonth)
-      .filter((e) => (e.start as Date).getFullYear() === currentYear)
-      .reduce((sum, e) => sum + e.minutes, 0);
-    const distinctPersons = new Set(
-      mapped
-        .filter((e) => e.type === "bible_course")
-        .filter((e) => (e.start as Date).getMonth() === currentMonth)
-        .filter((e) => (e.start as Date).getFullYear() === currentYear)
-        .filter((e) => e.person_id)
-        .map((e) => e.person_id as string)
-    ).size;
-    setMonthMetrics({
-      month: format(new Date(currentYear, currentMonth, 1), "MMMM yyyy", {
-        locale: es,
-      }),
-      preachingMinutes,
-      distinctPersons,
-    });
     setLoading(false);
   }, []);
 
@@ -217,8 +207,20 @@ export default function CalendarView() {
         .from("activity_entries")
         .delete()
         .eq("id", evt.id);
-      if (error) alert(error.message);
-      else fetchEntries();
+      if (error) {
+        setSnackbar({
+          open: true,
+          message: error.message || "Error eliminando",
+          severity: "error",
+        });
+      } else {
+        fetchEntries();
+        setSnackbar({
+          open: true,
+          message: "Registro eliminado",
+          severity: "success",
+        });
+      }
     } else if (action === "e") {
       setModalType(evt.type);
       setModalDate(evt.start as Date);
@@ -269,62 +271,158 @@ export default function CalendarView() {
     []
   );
 
-  if (loading) return <div style={{ padding: 16 }}>Cargando...</div>;
+  // Metrics derived from events + viewDate (month scope)
+  const metrics = useMemo(() => {
+    const y = viewDate.getFullYear();
+    const m = viewDate.getMonth();
+    const preachingMinutes = events
+      .filter((e) => e.type === "preaching")
+      .filter((e) => (e.start as Date).getFullYear() === y)
+      .filter((e) => (e.start as Date).getMonth() === m)
+      .reduce((acc, e) => acc + e.minutes, 0);
+    const distinctPersons = new Set(
+      events
+        .filter((e) => e.type === "bible_course")
+        .filter((e) => (e.start as Date).getFullYear() === y)
+        .filter((e) => (e.start as Date).getMonth() === m)
+        .filter((e) => e.person_id)
+        .map((e) => e.person_id as string)
+    ).size;
+    const monthLabel = format(new Date(y, m, 1), "MMMM yyyy", { locale: es });
+    return { preachingMinutes, distinctPersons, monthLabel };
+  }, [events, viewDate]);
+
+  const goPrevMonth = () => {
+    setViewDate((d) => new Date(d.getFullYear(), d.getMonth() - 1, 1));
+  };
+  const goNextMonth = () => {
+    setViewDate((d) => new Date(d.getFullYear(), d.getMonth() + 1, 1));
+  };
+  const goToday = () => setViewDate(new Date());
+
+  if (loading) return <Box p={2}>Cargando...</Box>;
   if (errorMsg)
-    return <div style={{ padding: 16, color: "red" }}>Error: {errorMsg}</div>;
+    return (
+      <Box p={2} color="error.main">
+        Error: {errorMsg}
+      </Box>
+    );
 
   return (
-    <div
-      style={{
+    <Box
+      sx={{
         height: "calc(100vh - 64px)",
-        padding: 16,
+        p: 3,
         display: "flex",
         flexDirection: "column",
+        gap: 3,
       }}
     >
-      {monthMetrics && (
-        <div
-          style={{
-            display: "flex",
-            gap: 16,
-            flexWrap: "wrap",
-            marginBottom: 12,
-            fontSize: 13,
-            background: "#f5f5f5",
-            padding: 8,
-            borderRadius: 6,
-          }}
+      <Stack spacing={2}>
+        <Stack
+          direction="row"
+          flexWrap="wrap"
+          alignItems="center"
+          justifyContent="space-between"
+          gap={1}
         >
-          <span>
-            Mes actual: <strong>{monthMetrics.month}</strong>
-          </span>
-          <span>
-            Tiempo de actividad:{" "}
-            <strong>
-              {Math.floor(monthMetrics.preachingMinutes / 60)}h{" "}
-              {monthMetrics.preachingMinutes % 60}m
-            </strong>
-          </span>
-          <span>
-            Cursos bíblicos: <strong>{monthMetrics.distinctPersons}</strong>
-          </span>
-        </div>
-      )}
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Tooltip title="Mes anterior">
+              <IconButton size="small" onClick={goPrevMonth}>
+                <ArrowBackIosNewIcon fontSize="inherit" />
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="Hoy">
+              <IconButton size="small" onClick={goToday}>
+                <TodayIcon fontSize="inherit" />
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="Mes siguiente">
+              <IconButton size="small" onClick={goNextMonth}>
+                <ArrowForwardIosIcon fontSize="inherit" />
+              </IconButton>
+            </Tooltip>
+          </Stack>
+          <Typography
+            variant="h6"
+            sx={{ fontWeight: 600, textTransform: "capitalize" }}
+          >
+            {metrics.monthLabel}
+          </Typography>
+          <Typography
+            variant="caption"
+            sx={{ opacity: 0.7, display: { xs: "none", sm: "inline" } }}
+          >
+            Vista mensual
+          </Typography>
+        </Stack>
+        <Stack
+          direction={{ xs: "column", sm: "row" }}
+          spacing={2}
+          alignItems="stretch"
+        >
+          <Card sx={{ flex: 1, minWidth: 220 }} variant="outlined">
+            <CardContent>
+              <Typography variant="overline" sx={{ lineHeight: 1 }}>
+                Tiempo predicación
+              </Typography>
+              <Typography variant="h6" fontWeight={600}>
+                {Math.floor(metrics.preachingMinutes / 60)}h{" "}
+                {metrics.preachingMinutes % 60}m
+              </Typography>
+              <Chip size="small" label="Mes actual" sx={{ mt: 1 }} />
+            </CardContent>
+          </Card>
+          <Card sx={{ flex: 1, minWidth: 180 }} variant="outlined">
+            <CardContent>
+              <Typography variant="overline" sx={{ lineHeight: 1 }}>
+                Cursos bíblicos
+              </Typography>
+              <Typography variant="h6" fontWeight={600}>
+                {metrics.distinctPersons}
+              </Typography>
+              <Chip size="small" label="Personas" sx={{ mt: 1 }} />
+            </CardContent>
+          </Card>
+          <Card sx={{ flex: 1, minWidth: 160 }} variant="outlined">
+            <CardContent>
+              <Typography variant="overline" sx={{ lineHeight: 1 }}>
+                Sesiones
+              </Typography>
+              <Typography variant="h6" fontWeight={600}>
+                {events.length}
+              </Typography>
+              <Chip size="small" label="Total" sx={{ mt: 1 }} />
+            </CardContent>
+          </Card>
+        </Stack>
+      </Stack>
       {events.length === 0 && (
-        <div
-          style={{
-            padding: 12,
-            border: "1px dashed #ccc",
-            borderRadius: 4,
-            marginBottom: 12,
+        <Box
+          sx={{
+            p: 2,
+            border: "1px dashed",
+            borderColor: "divider",
+            borderRadius: 2,
             fontSize: 14,
           }}
         >
           No hay registros todavía. Selecciona un día en el calendario para
           crear uno.
-        </div>
+        </Box>
       )}
-      <div style={{ flex: 1 }}>
+      <Box
+        sx={{
+          flex: 1,
+          minHeight: 0,
+          "& .rbc-month-view": {
+            bgcolor: "background.paper",
+            borderRadius: 2,
+            overflow: "hidden",
+          },
+          borderRadius: 2,
+        }}
+      >
         <Calendar
           localizer={localizer}
           events={events}
@@ -335,8 +433,17 @@ export default function CalendarView() {
           onSelectEvent={onSelectEvent}
           views={["month", "week", "day"]}
           messages={messages}
+          date={viewDate}
+          onNavigate={(d) => setViewDate(d as Date)}
+          eventPropGetter={(event) => {
+            const cls =
+              event.type === "preaching"
+                ? "event-preaching"
+                : "event-bible_course";
+            return { className: cls };
+          }}
         />
-      </div>
+      </Box>
       <ActivityModal
         open={modalOpen}
         mode={editData ? "edit" : "create"}
@@ -347,9 +454,31 @@ export default function CalendarView() {
           setModalOpen(false);
           setEditData(null);
         }}
-        onSaved={fetchEntries}
+        onSaved={() => {
+          fetchEntries();
+          setSnackbar({
+            open: true,
+            message: editData ? "Registro actualizado" : "Registro creado",
+            severity: "success",
+          });
+        }}
         validateOverlap={validateOverlap}
       />
-    </div>
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={4000}
+        onClose={() => setSnackbar((s) => ({ ...s, open: false }))}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      >
+        <Alert
+          onClose={() => setSnackbar((s) => ({ ...s, open: false }))}
+          severity={snackbar.severity}
+          variant="filled"
+          sx={{ width: "100%" }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
+    </Box>
   );
 }
