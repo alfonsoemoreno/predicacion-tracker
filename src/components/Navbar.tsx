@@ -100,6 +100,8 @@ export default function Navbar() {
             ? "rgba(255,255,255,0.85)"
             : "rgba(21,24,27,0.7)",
         borderBottom: (t) => `1px solid ${t.palette.divider}`,
+        zIndex: (t) => t.zIndex.drawer + 2, // ensure above other content
+        pointerEvents: "auto",
       }}
     >
       <Toolbar sx={{ gap: 2, minHeight: 64 }}>

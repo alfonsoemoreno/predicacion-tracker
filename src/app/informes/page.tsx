@@ -28,14 +28,36 @@ import {
   TableRow,
   TableCell,
   TableBody,
-  Snackbar,
   MenuItem,
   Select,
   FormControl,
   InputLabel,
+  useMediaQuery,
+  Divider,
+  Tooltip,
+  TextField,
+  FormControlLabel,
+  Checkbox,
 } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
 import DownloadIcon from "@mui/icons-material/Download";
 import AddTaskIcon from "@mui/icons-material/AddTask";
+import EditIcon from "@mui/icons-material/Edit";
+import IconButton from "@mui/material/IconButton";
+
+// Pequeño componente para pares etiqueta/valor en vista móvil
+function InfoItem({ label, value }: { label: string; value: string }) {
+  return (
+    <Stack spacing={0.2} sx={{ minWidth: 90 }}>
+      <Typography variant="caption" sx={{ opacity: 0.6, fontSize: 10 }}>
+        {label}
+      </Typography>
+      <Typography variant="body2" sx={{ fontWeight: 600, fontSize: 13 }}>
+        {value}
+      </Typography>
+    </Stack>
+  );
+}
 
 export default function InformesPage() {
   const [baseYear, setBaseYear] = useState(() =>
@@ -45,14 +67,16 @@ export default function InformesPage() {
   const [loading, setLoading] = useState(true);
   const [genOpen, setGenOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [snackbar, setSnackbar] = useState<{
-    open: boolean;
-    message: string;
-    severity: "success" | "error";
-  }>({ open: false, message: "", severity: "success" });
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [newComment, setNewComment] = useState("");
+  const [includeAuto, setIncludeAuto] = useState(true);
+  const [editTarget, setEditTarget] = useState<MonthlyReportRow | null>(null);
+  const [editComment, setEditComment] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
   const nextIndex = reports.length; // sequential
   const canGenerate = nextIndex < 12;
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
 
   const yearLabel = `${baseYear}-${baseYear + 1}`;
 
@@ -89,23 +113,17 @@ export default function InformesPage() {
   const handleGenerate = async () => {
     setError(null);
     try {
-      const { report } = await generateMonthlyReportSequential(baseYear);
-      setReports((r) => [...r, report]);
-      setSnackbar({
-        open: true,
-        message: `Informe generado para ${monthName(report.month_index)} (${
-          report.whole_hours
-        }h + ${report.leftover_minutes}m restantes)`,
-        severity: "success",
+      const { report } = await generateMonthlyReportSequential(baseYear, {
+        comment: newComment || null,
+        includeAuto,
       });
+      setReports((r) => [...r, report]);
+      // Éxito: podrías mostrar Snackbar aquí si se reintroduce
       setGenOpen(false);
+      setNewComment("");
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      setSnackbar({
-        open: true,
-        message: msg || "Error generando informe",
-        severity: "error",
-      });
+      console.error(msg);
     }
   };
 
@@ -174,7 +192,7 @@ export default function InformesPage() {
         { key: "hours", header: "Horas", width: 14 },
         { key: "in", header: "Min entran", width: 22 },
         { key: "out", header: "Min salen", width: 22 },
-        { key: "sacred", header: "Serv. sagrado", width: 26 },
+        { key: "sacred", header: "Serv. sagrado (h)", width: 30 },
         { key: "studies", header: "Estudios", width: 18 },
         { key: "comments", header: "Comentarios", width: 48 },
         { key: "date", header: "Generado", width: 26 },
@@ -226,7 +244,7 @@ export default function InformesPage() {
           hours: String(r.whole_hours),
           in: `${r.carried_in_minutes}m`,
           out: `${r.carried_out_minutes}m`,
-          sacred: String(r.sacred_service_minutes ?? 0),
+          sacred: ((r.sacred_service_minutes ?? 0) / 60).toFixed(2),
           studies: String(r.distinct_studies),
           comments: r.comments ? r.comments.trim() : "",
           date: new Date(r.created_at).toLocaleDateString("es-ES"),
@@ -244,74 +262,67 @@ export default function InformesPage() {
         );
         ensurePage(rowHeight + 2);
         let x = startX;
-        // Zebra strip
-        if (idx % 2 === 0) {
+        doc.setFontSize(9);
+        const paintRowBg = idx % 2 === 0;
+        if (paintRowBg) {
           doc.setFillColor(252, 252, 252);
           doc.rect(
             startX - 2,
-            y - lineHeight + 1,
+            y - 3.2,
             columns.reduce((a, c) => a + c.width, 0) + 4,
-            rowHeight,
+            rowHeight + 4,
             "F"
           );
         }
         columns.forEach((col) => {
-          const value = cells[col.key];
+          let textVal = "";
           if (col.key === "comments") {
-            commentLines.forEach((ln, i) => {
-              doc.text(String(ln), x, y + i * lineHeight);
+            commentLines.forEach((l, i) => {
+              doc.text(l, x, y + i * lineHeight);
             });
           } else {
-            doc.text(String(value), x, y);
+            textVal = (cells[col.key] as string) || "";
+            doc.text(textVal, x, y);
           }
           x += col.width;
         });
-        y += rowHeight + 1;
+        y += rowHeight + 2.2;
       });
 
-      // Resumen
-      y += 2;
+      // Resumen final
       ensurePage(30);
+      y += 4;
       doc.setFontSize(11);
       doc.setFont?.("helvetica", "bold");
-      const totalHoursLine = `Total horas completas (predicación): ${totalWholeHours}h`;
-      doc.text(totalHoursLine, startX, y);
-      y += 6;
+      doc.text("Resumen", startX, y);
       doc.setFont?.("helvetica", "normal");
-      doc.text(`Minutos pendientes finales: ${finalLeftover}m`, startX, y);
       y += 6;
-      const sacredH = Math.floor(totalSacredMinutes / 60);
-      const sacredM = totalSacredMinutes % 60;
-      doc.text(
-        `Servicio sagrado total: ${sacredH}h ${sacredM}m (${totalSacredMinutes}m)`,
-        startX,
-        y
-      );
-      y += 6;
-      const annualGoal = 600;
-      const pct = ((totalWholeHours / annualGoal) * 100).toFixed(1);
-      doc.text(
-        `Meta anual predicación: ${annualGoal}h · Avance: ${totalWholeHours}h (${pct}%)`,
-        startX,
-        y
-      );
-      y += 6;
-      doc.setTextColor(120);
-      doc.setFontSize(8);
-      doc.text(
-        "Nota: 'Servicio sagrado' se registra aparte y no se suma a las horas de predicación.",
-        startX,
-        y
-      );
-      doc.save(`informes_${yearLabel}.pdf`);
-      setSnackbar({ open: true, message: "PDF generado", severity: "success" });
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setSnackbar({
-        open: true,
-        message: msg || "Error generando PDF",
-        severity: "error",
+      doc.setFontSize(9);
+      const totalWholeHours = reports.reduce((a, r) => a + r.whole_hours, 0);
+      const finalLeftover = reports.length
+        ? reports[reports.length - 1].leftover_minutes
+        : 0;
+      const totalSacredHours = (totalSacredMinutes / 60).toFixed(2);
+      const summaryLines = [
+        `Horas completas acumuladas: ${totalWholeHours}h`,
+        `Minutos finales pendientes: ${finalLeftover}m`,
+        `Servicio sagrado total: ${totalSacredHours}h`,
+        `Progreso meta anual (600h): ${((totalWholeHours / 600) * 100).toFixed(
+          1
+        )}%`,
+      ];
+      summaryLines.forEach((l) => {
+        if (y + lineHeight > pageBottom) {
+          doc.addPage();
+          y = 20;
+        }
+        doc.text(l, startX, y);
+        y += lineHeight + 0.5;
       });
+
+      doc.save(`informes_${yearLabel}.pdf`);
+    } catch (e) {
+      console.error(e);
     } finally {
       setPdfLoading(false);
     }
@@ -320,16 +331,7 @@ export default function InformesPage() {
   return (
     <AuthGuard>
       <Navbar />
-      <Box
-        sx={{
-          p: 3,
-          maxWidth: 1200,
-          mx: "auto",
-          display: "flex",
-          flexDirection: "column",
-          gap: 3,
-        }}
-      >
+      <Box sx={{ p: { xs: 1.5, md: 3 }, maxWidth: 1300, mx: "auto" }}>
         <Stack
           direction={{ xs: "column", md: "row" }}
           justifyContent="space-between"
@@ -417,56 +419,231 @@ export default function InformesPage() {
             <Typography variant="subtitle1" fontWeight={600} gutterBottom>
               Detalle de meses
             </Typography>
-            <Table size="small" aria-label="Tabla informes">
-              <TableHead>
-                <TableRow>
-                  <TableCell>Mes</TableCell>
-                  <TableCell>Horas</TableCell>
-                  <TableCell>Min entran</TableCell>
-                  <TableCell>Min salen</TableCell>
-                  <TableCell>Serv. sagrado (min)</TableCell>
-                  <TableCell>Estudios</TableCell>
-                  <TableCell>Comentarios</TableCell>
-                  <TableCell>Generado</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {reports.map((r) => (
-                  <TableRow key={r.id} hover>
-                    <TableCell sx={{ textTransform: "capitalize" }}>
-                      {monthName(r.month_index)}
-                    </TableCell>
-                    <TableCell>{r.whole_hours}</TableCell>
-                    <TableCell>{r.carried_in_minutes}m</TableCell>
-                    <TableCell>{r.carried_out_minutes}m</TableCell>
-                    <TableCell>{r.sacred_service_minutes ?? 0}</TableCell>
-                    <TableCell>{r.distinct_studies}</TableCell>
-                    <TableCell
+            {isMobile ? (
+              <Stack spacing={2} aria-label="Lista de informes mensuales">
+                {reports.map((r) => {
+                  const sacredHours = (
+                    (r.sacred_service_minutes ?? 0) / 60
+                  ).toFixed(2);
+                  return (
+                    <Card
+                      key={r.id}
+                      variant="outlined"
                       sx={{
-                        maxWidth: 140,
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
+                        background: "linear-gradient(145deg,#ffffff,#fafafa)",
+                        borderRadius: 2,
                       }}
                     >
-                      {r.comments || ""}
-                    </TableCell>
-                    <TableCell>
-                      {new Date(r.created_at).toLocaleDateString("es-ES")}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                      <CardContent sx={{ p: 2, "&:last-child": { pb: 2 } }}>
+                        <Stack
+                          direction="row"
+                          justifyContent="space-between"
+                          alignItems="center"
+                          mb={0.5}
+                        >
+                          <Typography
+                            variant="subtitle2"
+                            sx={{
+                              textTransform: "capitalize",
+                              fontWeight: 600,
+                            }}
+                          >
+                            {monthName(r.month_index)}
+                          </Typography>
+                          <Stack
+                            direction="row"
+                            spacing={1}
+                            alignItems="center"
+                          >
+                            <Typography variant="caption" sx={{ opacity: 0.7 }}>
+                              {new Date(r.created_at).toLocaleDateString(
+                                "es-ES"
+                              )}
+                            </Typography>
+                            <Tooltip
+                              title="Editar comentarios"
+                              placement="left"
+                              arrow
+                            >
+                              <span>
+                                <IconButton
+                                  size="small"
+                                  aria-label={`Editar comentarios de ${monthName(
+                                    r.month_index
+                                  )}`}
+                                  onClick={() => {
+                                    setEditTarget(r);
+                                    setEditComment(r.comments || "");
+                                  }}
+                                >
+                                  <EditIcon fontSize="inherit" />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                          </Stack>
+                        </Stack>
+                        <Divider sx={{ mb: 1 }} />
+                        <Stack
+                          direction="row"
+                          flexWrap="wrap"
+                          rowGap={0.5}
+                          columnGap={2}
+                        >
+                          <InfoItem label="Horas" value={`${r.whole_hours}h`} />
+                          <InfoItem
+                            label="Min entran"
+                            value={`${r.carried_in_minutes}m`}
+                          />
+                          <InfoItem
+                            label="Min salen"
+                            value={`${r.carried_out_minutes}m`}
+                          />
+                          <InfoItem
+                            label="Serv. sagrado"
+                            value={`${sacredHours}h`}
+                          />
+                          <InfoItem
+                            label="Estudios"
+                            value={String(r.distinct_studies)}
+                          />
+                        </Stack>
+                        {r.comments && (
+                          <Box mt={1}>
+                            <Typography
+                              variant="caption"
+                              sx={{ opacity: 0.7, display: "block", mb: 0.3 }}
+                            >
+                              Comentarios
+                            </Typography>
+                            <Typography
+                              variant="body2"
+                              sx={{
+                                fontSize: 12,
+                                whiteSpace: "pre-line",
+                                maxHeight: 160,
+                                overflow: "hidden",
+                              }}
+                            >
+                              {r.comments}
+                            </Typography>
+                          </Box>
+                        )}
+                      </CardContent>
+                    </Card>
+                  );
+                })}
                 {reports.length === 0 && !loading && (
+                  <Typography variant="body2" sx={{ opacity: 0.7 }}>
+                    Sin informes todavía.
+                  </Typography>
+                )}
+              </Stack>
+            ) : (
+              <Table size="small" aria-label="Tabla informes">
+                <TableHead>
                   <TableRow>
-                    <TableCell colSpan={8} style={{ opacity: 0.7 }}>
-                      Sin informes todavía.
+                    <TableCell>Mes</TableCell>
+                    <TableCell>Horas</TableCell>
+                    <TableCell>Min entran</TableCell>
+                    <TableCell>Min salen</TableCell>
+                    <TableCell>Serv. sagrado (h)</TableCell>
+                    <TableCell>Estudios</TableCell>
+                    <TableCell>Comentarios</TableCell>
+                    <TableCell>Generado</TableCell>
+                    <TableCell align="center" sx={{ width: 50 }}>
+                      Editar
                     </TableCell>
                   </TableRow>
-                )}
-              </TableBody>
-            </Table>
+                </TableHead>
+                <TableBody>
+                  {reports.map((r) => {
+                    const commentText = r.comments || "";
+                    const showTooltip = commentText.length > 25; // umbral arbitrario
+                    return (
+                      <TableRow
+                        key={r.id}
+                        hover
+                        onDoubleClick={() => {
+                          setEditTarget(r);
+                          setEditComment(r.comments || "");
+                        }}
+                        sx={{ cursor: "pointer" }}
+                      >
+                        <TableCell sx={{ textTransform: "capitalize" }}>
+                          {monthName(r.month_index)}
+                        </TableCell>
+                        <TableCell>{r.whole_hours}</TableCell>
+                        <TableCell>{r.carried_in_minutes}m</TableCell>
+                        <TableCell>{r.carried_out_minutes}m</TableCell>
+                        <TableCell>
+                          {((r.sacred_service_minutes ?? 0) / 60).toFixed(2)}
+                        </TableCell>
+                        <TableCell>{r.distinct_studies}</TableCell>
+                        <TableCell
+                          sx={{
+                            maxWidth: 160,
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            cursor: showTooltip ? "help" : "default",
+                          }}
+                        >
+                          {showTooltip ? (
+                            <Tooltip
+                              title={
+                                <Box
+                                  sx={{ whiteSpace: "pre-line", fontSize: 12 }}
+                                >
+                                  {commentText}
+                                </Box>
+                              }
+                              disableInteractive
+                              arrow
+                              placement="top-start"
+                            >
+                              <span>{commentText}</span>
+                            </Tooltip>
+                          ) : (
+                            commentText
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {new Date(r.created_at).toLocaleDateString("es-ES")}
+                        </TableCell>
+                        <TableCell align="center">
+                          <Tooltip title="Editar comentarios" arrow>
+                            <span>
+                              <IconButton
+                                size="small"
+                                aria-label={`Editar comentarios de ${monthName(
+                                  r.month_index
+                                )}`}
+                                onClick={() => {
+                                  setEditTarget(r);
+                                  setEditComment(r.comments || "");
+                                }}
+                              >
+                                <EditIcon fontSize="inherit" />
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                  {reports.length === 0 && !loading && (
+                    <TableRow>
+                      <TableCell colSpan={8} style={{ opacity: 0.7 }}>
+                        Sin informes todavía.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            )}
           </CardContent>
         </Card>
+        {/* Dialog de generación */}
         <Dialog
           open={genOpen}
           onClose={() => setGenOpen(false)}
@@ -476,13 +653,36 @@ export default function InformesPage() {
           <DialogTitle>Generar informe</DialogTitle>
           <DialogContent>
             {nextIndex < 12 ? (
-              <Typography variant="body2" sx={{ mt: 1 }}>
-                Se generará el informe para{" "}
-                <strong style={{ textTransform: "capitalize" }}>
-                  {monthName(nextIndex)}
-                </strong>
-                . Este cierre bloqueará nuevas ediciones en ese mes.
-              </Typography>
+              <Stack spacing={2} sx={{ mt: 1 }}>
+                <Typography variant="body2">
+                  Se generará el informe para{" "}
+                  <strong style={{ textTransform: "capitalize" }}>
+                    {monthName(nextIndex)}
+                  </strong>
+                  . Este cierre bloqueará nuevas ediciones en ese mes.
+                </Typography>
+                <TextField
+                  label="Comentarios (opcional)"
+                  multiline
+                  minRows={2}
+                  value={newComment}
+                  onChange={(e) => setNewComment(e.target.value)}
+                  placeholder="Notas personales, aclaraciones, etc."
+                  inputProps={{ maxLength: 800 }}
+                  helperText={`${newComment.length}/800`}
+                  fullWidth
+                />
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={includeAuto}
+                      onChange={(e) => setIncludeAuto(e.target.checked)}
+                      size="small"
+                    />
+                  }
+                  label="Incluir resumen automático de servicio sagrado"
+                />
+              </Stack>
             ) : (
               <Alert severity="info" sx={{ mt: 1 }}>
                 Ya están generados los 12 meses del año teocrático.
@@ -500,20 +700,86 @@ export default function InformesPage() {
             </Button>
           </DialogActions>
         </Dialog>
-        <Snackbar
-          open={snackbar.open}
-          autoHideDuration={4000}
-          onClose={() => setSnackbar((s) => ({ ...s, open: false }))}
-          anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+        {/* Dialog edición de comentarios */}
+        <Dialog
+          open={!!editTarget}
+          onClose={() => !savingEdit && setEditTarget(null)}
+          fullWidth
+          maxWidth="sm"
         >
-          <Alert
-            onClose={() => setSnackbar((s) => ({ ...s, open: false }))}
-            severity={snackbar.severity}
-            variant="filled"
-          >
-            {snackbar.message}
-          </Alert>
-        </Snackbar>
+          <DialogTitle>Editar comentarios</DialogTitle>
+          <DialogContent>
+            {editTarget && (
+              <Stack spacing={2} sx={{ mt: 1 }}>
+                <Typography variant="body2" sx={{ opacity: 0.8 }}>
+                  {`Informe: ${monthName(editTarget.month_index)} (${
+                    editTarget.whole_hours
+                  }h + ${editTarget.leftover_minutes}m)`}
+                </Typography>
+                <TextField
+                  label="Comentarios"
+                  multiline
+                  minRows={3}
+                  value={editComment}
+                  onChange={(e) => setEditComment(e.target.value)}
+                  inputProps={{ maxLength: 1200 }}
+                  helperText={`${editComment.length}/1200`}
+                  fullWidth
+                  autoFocus
+                />
+                <Alert severity="info" variant="outlined">
+                  Solo puedes modificar el texto de comentarios. Las cifras del
+                  informe permanecen protegidas.
+                </Alert>
+              </Stack>
+            )}
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setEditTarget(null)} disabled={savingEdit}>
+              Cancelar
+            </Button>
+            <Button
+              variant="contained"
+              disabled={savingEdit}
+              onClick={async () => {
+                if (!editTarget) return;
+                setSavingEdit(true);
+                try {
+                  const { error: updErr } = await supabase
+                    .from("monthly_reports")
+                    .update({ comments: editComment || null })
+                    .eq("id", editTarget.id)
+                    .select("*")
+                    .single();
+                  if (updErr) throw updErr;
+                  setReports((rs) =>
+                    rs.map((r) =>
+                      r.id === editTarget.id
+                        ? { ...r, comments: editComment || null }
+                        : r
+                    )
+                  );
+                  setEditTarget(null);
+                } catch (e: unknown) {
+                  const msg =
+                    e instanceof Error
+                      ? e.message
+                      : "Error guardando comentarios";
+                  console.error(msg);
+                  alert(
+                    msg.includes("SOLO_COMMENTS_EDITABLE")
+                      ? "Solo puedes editar los comentarios."
+                      : msg
+                  );
+                } finally {
+                  setSavingEdit(false);
+                }
+              }}
+            >
+              {savingEdit ? "Guardando..." : "Guardar"}
+            </Button>
+          </DialogActions>
+        </Dialog>
       </Box>
     </AuthGuard>
   );

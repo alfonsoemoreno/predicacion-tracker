@@ -55,9 +55,10 @@ export async function fetchReports(baseYear: number) {
 }
 
 export interface MonthAggregateResult {
-  totalMinutes: number;
+  totalMinutes: number; // preaching only
   distinctStudies: number;
   sacredServiceMinutes: number;
+  sacredServiceCount: number;
 }
 
 export async function aggregateMonth(
@@ -74,12 +75,28 @@ export async function aggregateMonth(
     .gte("activity_date", from)
     .lt("activity_date", to);
   if (preachingErr) throw preachingErr;
-  let totalMinutes = 0;
+  let totalMinutes = 0; // preaching
   let sacredServiceMinutes = 0;
+  let sacredServiceCount = 0;
   const distinctStudyIds = new Set<string>();
   (preachingData || []).forEach((r) => {
-    if (r.type === "preaching") totalMinutes += r.minutes || 0;
-    if (r.type === "sacred_service") sacredServiceMinutes += r.minutes || 0;
+    // Recalcular minutos si vienen null usando start_time/end_time (por compatibilidad)
+    const coerceMinutes = () => {
+      if (r.minutes != null) return r.minutes;
+      if (r.start_time && r.end_time) {
+        // Expect HH:MM:SS
+        const [sh, sm] = r.start_time.split(":").map(Number);
+        const [eh, em] = r.end_time.split(":").map(Number);
+        const diff = eh * 60 + em - (sh * 60 + sm);
+        return diff > 0 ? diff : 0;
+      }
+      return 0;
+    };
+    if (r.type === "preaching") totalMinutes += coerceMinutes();
+    if (r.type === "sacred_service") {
+      sacredServiceMinutes += coerceMinutes();
+      sacredServiceCount += 1;
+    }
     if (r.type === "bible_course" && r.person_id)
       distinctStudyIds.add(r.person_id);
   });
@@ -87,6 +104,7 @@ export async function aggregateMonth(
     totalMinutes,
     distinctStudies: distinctStudyIds.size,
     sacredServiceMinutes,
+    sacredServiceCount,
   };
 }
 
@@ -94,7 +112,10 @@ export interface GenerateReportResult {
   report: MonthlyReportRow;
 }
 
-export async function generateMonthlyReportSequential(baseYear: number) {
+export async function generateMonthlyReportSequential(
+  baseYear: number,
+  opts?: { comment?: string | null; includeAuto?: boolean }
+) {
   // Fetch existing reports to know next index & carried_in
   const { data: sessionData } = await supabase.auth.getSession();
   const userId = sessionData.session?.user.id;
@@ -110,6 +131,41 @@ export async function generateMonthlyReportSequential(baseYear: number) {
   const wholeHours = Math.floor(effective / 60);
   const leftover = effective % 60;
   const { start, end } = monthRange(baseYear, nextIndex);
+  // Auto comment with per-record sacred service detail (X.XXh - Title)
+  let autoComment: string | null = null;
+  if (sacredServiceMinutes > 0 && (opts?.includeAuto ?? true)) {
+    // Fetch rows for this month to list each sacred_service entry
+    const from = start.toISOString().slice(0, 10);
+    const to = end.toISOString().slice(0, 10);
+    const { data: sacredRows, error: sacredErr } = await supabase
+      .from("activity_entries")
+      .select("title, minutes, start_time, end_time, type")
+      .gte("activity_date", from)
+      .lt("activity_date", to)
+      .eq("type", "sacred_service");
+    if (sacredErr) throw sacredErr;
+    const lines: string[] = [];
+    (sacredRows || []).forEach((row) => {
+      let mins = row.minutes as number | null;
+      if (mins == null && row.start_time && row.end_time) {
+        const [sh, sm] = row.start_time.split(":").map(Number);
+        const [eh, em] = row.end_time.split(":").map(Number);
+        const diff = eh * 60 + em - (sh * 60 + sm);
+        mins = diff > 0 ? diff : 0;
+      }
+      const hours = ((mins || 0) / 60).toFixed(2);
+      const title = (row.title && row.title.trim()) || "(Sin título)";
+      lines.push(`${hours}h - ${title}`);
+    });
+    autoComment = lines.join(" | ");
+  }
+  // Combinar comentario manual y automático (si existe)
+  let finalComments: string | null = null;
+  const manual = opts?.comment?.trim();
+  if (manual && autoComment) finalComments = manual + " | " + autoComment;
+  else if (manual) finalComments = manual;
+  else finalComments = autoComment;
+
   const payload = {
     user_id: userId,
     period_year: baseYear,
@@ -124,7 +180,7 @@ export async function generateMonthlyReportSequential(baseYear: number) {
     effective_minutes: effective,
     distinct_studies: distinctStudies,
     sacred_service_minutes: sacredServiceMinutes,
-    comments: null,
+    comments: finalComments,
     locked: true,
   };
   const { data, error } = await supabase

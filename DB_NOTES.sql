@@ -200,3 +200,84 @@ ALTER TABLE monthly_reports ADD COLUMN IF NOT EXISTS comments text;
 -- Nota: total_minutes continúa representando solo predicación.
 -- sacred_service_minutes se mostrará en informes y estadísticas aparte; no afecta cálculo de horas completas ni rollover.
 
+-- Si la columna activity_entries.type es un ENUM (activity_type) y todavía no incluye 'sacred_service',
+-- hay que extenderlo. (El error reportado: "invalid input value for enum activity_type: 'sacred_service'")
+-- Supabase (Postgres >= 14) permite ALTER TYPE ... ADD VALUE de forma directa.
+DO $$
+BEGIN
+	IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'activity_type') THEN
+		IF NOT EXISTS (
+			SELECT 1 FROM pg_type t
+			JOIN pg_enum e ON t.oid = e.enumtypid
+			WHERE t.typname = 'activity_type' AND e.enumlabel = 'sacred_service'
+		) THEN
+			ALTER TYPE activity_type ADD VALUE 'sacred_service';
+		END IF;
+	END IF;
+END $$;
+
+-- Si tu versión de Postgres fuese muy antigua y no soportara el bloque anterior con DO/IF, usar plan B manual:
+-- 1) CREATE TYPE activity_type_new AS ENUM ('preaching','bible_course','sacred_service');
+-- 2) ALTER TABLE activity_entries ALTER COLUMN type TYPE activity_type_new USING type::text::activity_type_new;
+-- 3) DROP TYPE activity_type;
+-- 4) ALTER TYPE activity_type_new RENAME TO activity_type;
+-- (No ejecutar el plan B si ya funcionó el DO $$ ... $$ superior.)
+
+--------------------------------------------------------------------------------
+-- 6. Edición posterior SOLO de comentarios en monthly_reports
+--------------------------------------------------------------------------------
+-- Requisito: permitir que el usuario edite el campo comments incluso después
+-- de que el informe esté bloqueado (locked = true) SIN permitir cambiar cifras.
+-- Estrategia:
+--  a) Política UPDATE permitiendo al dueño (auth.uid() = user_id)
+--  b) Trigger BEFORE UPDATE que impida modificar cualquier columna distinta
+--     de comments.
+
+DO $$
+BEGIN
+	IF NOT EXISTS (
+		SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename='monthly_reports' AND policyname='upd_monthly_reports_comments'
+	) THEN
+		CREATE POLICY upd_monthly_reports_comments ON monthly_reports
+			FOR UPDATE USING (auth.uid() = user_id)
+			WITH CHECK (auth.uid() = user_id);
+	END IF;
+END $$;
+
+CREATE OR REPLACE FUNCTION enforce_update_comments_only()
+RETURNS trigger AS $$
+DECLARE
+	same boolean;
+BEGIN
+	-- Permitir sólo cambio en comments; cualquier otro cambio -> error
+	same := (
+		OLD.user_id = NEW.user_id AND
+		OLD.period_year = NEW.period_year AND
+		OLD.month_index = NEW.month_index AND
+		OLD.period_start = NEW.period_start AND
+		OLD.period_end = NEW.period_end AND
+		OLD.total_minutes = NEW.total_minutes AND
+		OLD.carried_in_minutes = NEW.carried_in_minutes AND
+		OLD.carried_out_minutes = NEW.carried_out_minutes AND
+		OLD.whole_hours = NEW.whole_hours AND
+		OLD.leftover_minutes = NEW.leftover_minutes AND
+		OLD.effective_minutes = NEW.effective_minutes AND
+		OLD.distinct_studies = NEW.distinct_studies AND
+		OLD.locked = NEW.locked AND
+		COALESCE(OLD.sacred_service_minutes, -1) = COALESCE(NEW.sacred_service_minutes, -1)
+	);
+	IF NOT same THEN
+		RAISE EXCEPTION 'SOLO_COMMENTS_EDITABLE' USING ERRCODE='check_violation';
+	END IF;
+	RETURN NEW;
+END;$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trg_monthly_reports_comments_only ON monthly_reports;
+CREATE TRIGGER trg_monthly_reports_comments_only
+BEFORE UPDATE ON monthly_reports
+FOR EACH ROW EXECUTE FUNCTION enforce_update_comments_only();
+
+-- Manejo en cliente: si error incluye SOLO_COMMENTS_EDITABLE -> mostrar mensaje
+-- 'Solo es posible editar los comentarios del informe.'
+
+

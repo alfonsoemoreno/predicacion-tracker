@@ -1,27 +1,26 @@
 "use client";
-import {
-  Calendar,
-  dateFnsLocalizer,
-  Event as RBCEvent,
-  SlotInfo,
-  View,
-} from "react-big-calendar";
-import "react-big-calendar/lib/css/react-big-calendar.css";
-import { format, parse, startOfWeek, getDay } from "date-fns";
-import { es } from "date-fns/locale/es";
+// react-big-calendar types kept minimal; full component removed in favor of custom views
+import { Event as RBCEvent, SlotInfo, View } from "react-big-calendar";
+import { format, addMonths, addWeeks, addDays } from "date-fns";
+import { es } from "date-fns/locale";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import useMediaQuery from "@mui/material/useMediaQuery";
 import { supabase } from "@/lib/supabaseClient";
 import ActivityModal from "./ActivityModal";
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
-import IconButton from "@mui/material/IconButton";
 import Typography from "@mui/material/Typography";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
-import Tooltip from "@mui/material/Tooltip";
 import ArrowBackIosNewIcon from "@mui/icons-material/ArrowBackIosNew";
 import ArrowForwardIosIcon from "@mui/icons-material/ArrowForwardIos";
 import TodayIcon from "@mui/icons-material/Today";
+import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
+import ViewWeekIcon from "@mui/icons-material/ViewWeek";
+import TodayOutlinedIcon from "@mui/icons-material/TodayOutlined";
+import ButtonGroup from "@mui/material/ButtonGroup";
+import Button from "@mui/material/Button";
+import { useTheme } from "@mui/material/styles";
 import Snackbar from "@mui/material/Snackbar";
 import Alert from "@mui/material/Alert";
 import Menu from "@mui/material/Menu";
@@ -30,22 +29,34 @@ import ListItemIcon from "@mui/material/ListItemIcon";
 import EditIcon from "@mui/icons-material/Edit";
 import DeleteIcon from "@mui/icons-material/Delete";
 import Chip from "@mui/material/Chip";
+import BusinessCenterOutlinedIcon from "@mui/icons-material/BusinessCenterOutlined";
+import MenuBookOutlinedIcon from "@mui/icons-material/MenuBookOutlined";
+import ConstructionOutlinedIcon from "@mui/icons-material/ConstructionOutlined";
 import {
   computeTheocraticYearBase,
   monthIndexFromDate,
   fetchReports,
 } from "@/lib/reports";
 
-// Localizador para react-big-calendar usando date-fns en español.
-const locales = { es } as const;
-const localizer = dateFnsLocalizer({
-  format,
-  parse: (str: string, fmt: string, refDate: Date) =>
-    parse(str, fmt, refDate, { locale: es }),
-  startOfWeek: () => startOfWeek(new Date(), { weekStartsOn: 1 }),
-  getDay,
-  locales,
-});
+// Localización: se usa locale 'es' de date-fns para todos los formatos.
+
+// Manual startOfWeek to avoid any subtle changes in date-fns v4 behavior.
+// Always returns a new Date representing Monday (00:00 local) of the week containing `date`.
+function startOfWeekManual(date: Date): Date {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const jsDay = d.getDay(); // 0=Sun..6=Sat
+  // If Sunday (0) we go back 6 days, else we go back (jsDay-1) days to reach Monday
+  const diff = jsDay === 0 ? -6 : 1 - jsDay;
+  d.setDate(d.getDate() + diff);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+// getDayStable no longer required after removing react-big-calendar.
+
+// localizer removed (all custom views implemented)
+
+// Debug instrumentation components removed after resolving DST duplication root cause.
 
 interface EntryEvent extends RBCEvent {
   id: string;
@@ -54,9 +65,859 @@ interface EntryEvent extends RBCEvent {
   person_id?: string | null;
   person_name?: string | null;
   person_color?: string | null;
+  hideTime?: boolean; // para eventos donde no se muestra hora (curso bíblico)
 }
 
+// Toolbar personalizado para mejorar contraste y localización
+// Unified toolbar used for both custom month grid and week/day (react-big-calendar) views.
+interface UnifiedToolbarProps {
+  date: Date;
+  view: View;
+  onView: (v: View) => void;
+  onNavigate: (action: "TODAY" | "PREV" | "NEXT") => void;
+}
+function UnifiedToolbar({
+  date,
+  view,
+  onView,
+  onNavigate,
+}: UnifiedToolbarProps) {
+  const theme = useTheme();
+  const isDark = theme.palette.mode === "dark";
+  const colorStyles = {
+    textTransform: "none",
+    fontSize: 13,
+    fontWeight: 600,
+    letterSpacing: 0.2,
+    "&.rbc-active": {
+      backgroundColor: isDark
+        ? theme.palette.primary.dark
+        : theme.palette.primary.main,
+      color: theme.palette.primary.contrastText,
+    },
+  } as const;
+  const goTo = (action: "TODAY" | "PREV" | "NEXT") => onNavigate(action);
+  return (
+    <Stack
+      direction={{ xs: "column", sm: "row" }}
+      spacing={1}
+      alignItems={{ xs: "flex-start", sm: "center" }}
+      justifyContent="space-between"
+      sx={{ mb: 1.5 }}
+    >
+      <Stack direction="row" spacing={1} alignItems="center">
+        <ButtonGroup
+          size="small"
+          variant="outlined"
+          aria-label="Navegación del calendario"
+        >
+          <Button
+            onClick={() => goTo("PREV")}
+            aria-label="Mes anterior"
+            startIcon={<ArrowBackIosNewIcon fontSize="inherit" />}
+          >
+            Atrás
+          </Button>
+          <Button
+            onClick={() => goTo("TODAY")}
+            aria-label="Ir a hoy"
+            startIcon={<TodayIcon fontSize="inherit" />}
+          >
+            Hoy
+          </Button>
+          <Button
+            onClick={() => goTo("NEXT")}
+            aria-label="Mes siguiente"
+            endIcon={<ArrowForwardIosIcon fontSize="inherit" />}
+          >
+            Siguiente
+          </Button>
+        </ButtonGroup>
+      </Stack>
+      <Typography
+        variant="h6"
+        sx={{ fontWeight: 600, textTransform: "capitalize" }}
+      >
+        {format(date, "MMMM yyyy", { locale: es })}
+      </Typography>
+      <ButtonGroup
+        size="small"
+        variant="outlined"
+        aria-label="Cambiar vista calendario"
+      >
+        <Button
+          onClick={() => onView("month")}
+          className={view === "month" ? "rbc-active" : ""}
+          startIcon={<CalendarMonthIcon fontSize="inherit" />}
+          sx={colorStyles}
+        >
+          Mes
+        </Button>
+        <Button
+          onClick={() => onView("week")}
+          className={view === "week" ? "rbc-active" : ""}
+          startIcon={<ViewWeekIcon fontSize="inherit" />}
+          sx={colorStyles}
+        >
+          Semana
+        </Button>
+        <Button
+          onClick={() => onView("day")}
+          className={view === "day" ? "rbc-active" : ""}
+          startIcon={<TodayOutlinedIcon fontSize="inherit" />}
+          sx={colorStyles}
+        >
+          Día
+        </Button>
+      </ButtonGroup>
+    </Stack>
+  );
+}
+
+// --- Custom Month Grid component (outside toolbar) ---
+interface CustomMonthGridProps {
+  viewDate: Date;
+  events: EntryEvent[];
+  onSelectDay: (date: Date) => void;
+  onSelectEvent: (evt: EntryEvent, e: React.SyntheticEvent) => void;
+  isDateLocked: (d: Date) => boolean;
+}
+const CustomMonthGrid: React.FC<CustomMonthGridProps> = ({
+  viewDate,
+  events,
+  onSelectDay,
+  onSelectEvent,
+  isDateLocked,
+}) => {
+  const year = viewDate.getFullYear();
+  const month = viewDate.getMonth();
+  const firstOfMonth = new Date(year, month, 1, 12, 0, 0, 0);
+  const gridStart = startOfWeekManual(firstOfMonth);
+  gridStart.setHours(12, 0, 0, 0);
+  const days: Date[] = [];
+  for (let i = 0; i < 42; i++) {
+    const d = new Date(gridStart);
+    d.setDate(gridStart.getDate() + i);
+    d.setHours(12, 0, 0, 0);
+    days.push(d);
+  }
+  const weeks: Date[][] = [];
+  for (let i = 0; i < 42; i += 7) weeks.push(days.slice(i, i + 7));
+  const dayEventsCache = new Map<string, EntryEvent[]>();
+  const keyFor = (d: Date) =>
+    `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+  for (const ev of events) {
+    const start = ev.start as Date;
+    const k = keyFor(start);
+    if (!dayEventsCache.has(k)) dayEventsCache.set(k, []);
+    dayEventsCache.get(k)!.push(ev);
+  }
+  const weekdayLabels = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+  return (
+    <Box
+      sx={{
+        display: "flex",
+        flexDirection: "column",
+        flex: 1,
+        bgcolor: "background.paper",
+        borderRadius: 2,
+        overflow: "hidden",
+        border: (t) => `1px solid ${t.palette.divider}`,
+      }}
+    >
+      <Box
+        sx={{
+          display: "grid",
+          gridTemplateColumns: "repeat(7,1fr)",
+          borderBottom: (t) => `1px solid ${t.palette.divider}`,
+          bgcolor: "background.default",
+        }}
+      >
+        {weekdayLabels.map((lbl) => (
+          <Box
+            key={lbl}
+            sx={{ p: 0.75, fontSize: 11, fontWeight: 600, textAlign: "center" }}
+          >
+            {lbl}
+          </Box>
+        ))}
+      </Box>
+      <Box
+        sx={{
+          display: "grid",
+          gridTemplateRows: "repeat(6,1fr)",
+          flex: 1,
+          minHeight: 0,
+        }}
+      >
+        {weeks.map((week, wi) => (
+          <Box
+            key={wi}
+            sx={{
+              display: "grid",
+              gridTemplateColumns: "repeat(7,1fr)",
+              minHeight: 0,
+            }}
+          >
+            {week.map((day, di) => {
+              const inMonth = day.getMonth() === month;
+              const locked = isDateLocked(day);
+              const k = keyFor(day);
+              const dayEvents = dayEventsCache.get(k) || [];
+              return (
+                <Box
+                  key={di}
+                  onClick={() => onSelectDay(day)}
+                  sx={{
+                    position: "relative",
+                    borderRight:
+                      di < 6 ? (t) => `1px solid ${t.palette.divider}` : "none",
+                    borderBottom:
+                      wi < weeks.length - 1
+                        ? (t) => `1px solid ${t.palette.divider}`
+                        : "none",
+                    p: 0.5,
+                    fontSize: 12,
+                    cursor: "pointer",
+                    bgcolor: locked ? "action.hover" : "background.default",
+                    color: inMonth ? "text.primary" : "text.disabled",
+                    display: "flex",
+                    flexDirection: "column",
+                    minHeight: 0,
+                    overflow: "hidden",
+                    "&:hover": {
+                      bgcolor: locked ? "action.hover" : "action.hover",
+                    },
+                  }}
+                >
+                  <Box
+                    sx={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      mb: 0.25,
+                    }}
+                  >
+                    <Typography
+                      component="span"
+                      sx={{ fontSize: 12, fontWeight: 600 }}
+                    >
+                      {day.getDate()}
+                    </Typography>
+                    {locked && (
+                      <Typography
+                        component="span"
+                        sx={{
+                          fontSize: 9,
+                          fontWeight: 600,
+                          color: "warning.main",
+                        }}
+                      >
+                        🔒
+                      </Typography>
+                    )}
+                  </Box>
+                  <Box
+                    sx={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 0.25,
+                      overflowY: "auto",
+                    }}
+                  >
+                    {dayEvents.map((ev) => {
+                      const isCourse = ev.type === "bible_course";
+                      const isSacred = ev.type === "sacred_service";
+                      const bg = isCourse
+                        ? ev.person_color || "warning.light"
+                        : isSacred
+                        ? "secondary.light"
+                        : "primary.light";
+                      const titleParts: string[] = [];
+                      if (ev.type === "preaching")
+                        titleParts.push("__ICON_MINISTERIO__");
+                      if (isCourse) titleParts.push("__ICON_CURSO__");
+                      if (isSacred) titleParts.push("__ICON_SAGRADO__");
+                      if (typeof ev.title === "string")
+                        titleParts.push(ev.title);
+                      if (!ev.allDay && !ev.hideTime) {
+                        const s = ev.start as Date;
+                        const en = ev.end as Date;
+                        titleParts.push(
+                          `${format(s, "HH:mm")}-${format(en, "HH:mm")}`
+                        );
+                      }
+                      // Transform tokens into icon components
+                      const parts = titleParts.map((p, idx) => {
+                        if (p === "__ICON_MINISTERIO__")
+                          return (
+                            <BusinessCenterOutlinedIcon
+                              key={idx}
+                              sx={{
+                                fontSize: 14,
+                                verticalAlign: "middle",
+                                color: "text.secondary",
+                              }}
+                            />
+                          );
+                        if (p === "__ICON_CURSO__")
+                          return (
+                            <MenuBookOutlinedIcon
+                              key={idx}
+                              sx={{
+                                fontSize: 14,
+                                verticalAlign: "middle",
+                                color: "text.secondary",
+                              }}
+                            />
+                          );
+                        if (p === "__ICON_SAGRADO__")
+                          return (
+                            <ConstructionOutlinedIcon
+                              key={idx}
+                              sx={{
+                                fontSize: 14,
+                                verticalAlign: "middle",
+                                color: "text.secondary",
+                              }}
+                            />
+                          );
+                        return (
+                          <span key={idx} style={{ whiteSpace: "nowrap" }}>
+                            {p}
+                          </span>
+                        );
+                      });
+                      return (
+                        <Box
+                          key={ev.id}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onSelectEvent(ev, e);
+                          }}
+                          sx={{
+                            bgcolor: bg,
+                            borderRadius: 1,
+                            px: 0.5,
+                            py: 0.25,
+                            fontSize: 10,
+                            lineHeight: 1.1,
+                            fontWeight: 500,
+                            boxShadow: (t) =>
+                              `inset 0 0 0 1px ${t.palette.divider}`,
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 0.5,
+                            overflow: "hidden",
+                            "&:hover": { filter: "brightness(0.95)" },
+                          }}
+                          title={titleParts
+                            .filter((t) => !t.startsWith("__ICON"))
+                            .join(" · ")}
+                        >
+                          {parts}
+                        </Box>
+                      );
+                    })}
+                  </Box>
+                </Box>
+              );
+            })}
+          </Box>
+        ))}
+      </Box>
+    </Box>
+  );
+};
+
+// --- Custom Week Grid (Monday-first, DST safe) ---
+interface CustomWeekGridProps {
+  viewDate: Date; // any day inside the target week
+  events: EntryEvent[];
+  onSelectDay: (date: Date) => void;
+  onSelectEvent: (evt: EntryEvent, e: React.SyntheticEvent) => void;
+  isDateLocked: (d: Date) => boolean;
+}
+const CustomWeekGrid: React.FC<CustomWeekGridProps> = ({
+  viewDate,
+  events,
+  onSelectDay,
+  onSelectEvent,
+  isDateLocked,
+}) => {
+  const weekStart = startOfWeekManual(
+    new Date(
+      viewDate.getFullYear(),
+      viewDate.getMonth(),
+      viewDate.getDate(),
+      12
+    )
+  );
+  weekStart.setHours(12, 0, 0, 0);
+  const days: Date[] = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(weekStart);
+    d.setDate(weekStart.getDate() + i);
+    d.setHours(12, 0, 0, 0);
+    days.push(d);
+  }
+  const dayEvents: EntryEvent[][] = days.map(() => []);
+  for (const ev of events) {
+    const s = ev.start as Date;
+    const e = ev.end as Date;
+    for (let di = 0; di < days.length; di++) {
+      const day = days[di];
+      const dayStart = new Date(day);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(day);
+      dayEnd.setHours(23, 59, 59, 999);
+      if (e >= dayStart && s <= dayEnd) dayEvents[di].push(ev as EntryEvent);
+    }
+  }
+  // Simple ordering by start time
+  dayEvents.forEach((list) =>
+    list.sort(
+      (a, b) => (a.start as Date).getTime() - (b.start as Date).getTime()
+    )
+  );
+  const weekdayLabels = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+  return (
+    <Box
+      sx={{
+        display: "flex",
+        flexDirection: "column",
+        flex: 1,
+        bgcolor: "background.paper",
+        borderRadius: 2,
+        overflow: "hidden",
+        border: (t) => `1px solid ${t.palette.divider}`,
+      }}
+    >
+      <Box
+        sx={{
+          display: "grid",
+          gridTemplateColumns: "repeat(7,1fr)",
+          borderBottom: (t) => `1px solid ${t.palette.divider}`,
+          bgcolor: "background.default",
+        }}
+      >
+        {days.map((d, i) => {
+          const isToday = (() => {
+            const now = new Date();
+            return (
+              now.getFullYear() === d.getFullYear() &&
+              now.getMonth() === d.getMonth() &&
+              now.getDate() === d.getDate()
+            );
+          })();
+          return (
+            <Box
+              key={i}
+              sx={{
+                p: 1,
+                textAlign: "center",
+                fontSize: 13,
+                fontWeight: 600,
+                position: "relative",
+              }}
+            >
+              <Box
+                sx={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: 0.5,
+                }}
+              >
+                <span>{weekdayLabels[i]}</span>
+                <Box
+                  component="button"
+                  onClick={() => onSelectDay(d)}
+                  disabled={isDateLocked(d)}
+                  sx={{
+                    all: "unset",
+                    cursor: "pointer",
+                    width: 34,
+                    height: 34,
+                    borderRadius: "50%",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontWeight: 600,
+                    bgcolor: isToday ? "primary.main" : "transparent",
+                    color: isToday ? "primary.contrastText" : "text.primary",
+                    border: (t) => `1px solid ${t.palette.divider}`,
+                    "&:hover": {
+                      bgcolor: isToday ? "primary.dark" : "action.hover",
+                    },
+                    "&:focus-visible": {
+                      outline: "2px solid",
+                      outlineColor: "primary.main",
+                    },
+                    opacity: isDateLocked(d) ? 0.5 : 1,
+                  }}
+                >
+                  {d.getDate()}
+                </Box>
+              </Box>
+            </Box>
+          );
+        })}
+      </Box>
+      <Box
+        sx={{
+          display: "grid",
+          gridTemplateColumns: "repeat(7,1fr)",
+          flex: 1,
+          minHeight: 0,
+        }}
+      >
+        {days.map((d, i) => {
+          const list = dayEvents[i];
+          return (
+            <Box
+              key={i}
+              sx={{
+                borderRight:
+                  i < 6 ? (t) => `1px solid ${t.palette.divider}` : "none",
+                position: "relative",
+                minHeight: 160,
+                p: 0.5,
+              }}
+            >
+              <Stack spacing={0.5} alignItems="stretch">
+                {list.length === 0 && (
+                  <Box
+                    onClick={() => onSelectDay(d)}
+                    sx={{
+                      flex: 1,
+                      minHeight: 40,
+                      cursor: "pointer",
+                      borderRadius: 1,
+                      border: (t) => `1px dashed ${t.palette.divider}`,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 12,
+                      color: "text.secondary",
+                      "&:hover": { bgcolor: "action.hover" },
+                    }}
+                  >
+                    Añadir
+                  </Box>
+                )}
+                {list.map((ev) => {
+                  const start = ev.start as Date;
+                  const end = ev.end as Date;
+                  const isCourse = ev.type === "bible_course";
+                  const isSacred = ev.type === "sacred_service";
+                  const labelParts: string[] = [];
+                  if (ev.type === "preaching")
+                    labelParts.push("__ICON_MINISTERIO__");
+                  if (isCourse) labelParts.push("__ICON_CURSO__");
+                  if (isSacred) labelParts.push("__ICON_SAGRADO__");
+                  if (typeof ev.title === "string") labelParts.push(ev.title);
+                  if (!ev.hideTime) {
+                    labelParts.push(
+                      `${format(start, "HH:mm")} - ${format(end, "HH:mm")}`
+                    );
+                  }
+                  const bg = isCourse
+                    ? ev.person_color || "warning.light"
+                    : isSacred
+                    ? "secondary.light"
+                    : "primary.light";
+                  const parts = labelParts.map((p, idx) => {
+                    if (p === "__ICON_MINISTERIO__")
+                      return (
+                        <BusinessCenterOutlinedIcon
+                          key={idx}
+                          sx={{ fontSize: 16, color: "text.secondary" }}
+                        />
+                      );
+                    if (p === "__ICON_CURSO__")
+                      return (
+                        <MenuBookOutlinedIcon
+                          key={idx}
+                          sx={{ fontSize: 16, color: "text.secondary" }}
+                        />
+                      );
+                    if (p === "__ICON_SAGRADO__")
+                      return (
+                        <ConstructionOutlinedIcon
+                          key={idx}
+                          sx={{ fontSize: 16, color: "text.secondary" }}
+                        />
+                      );
+                    return (
+                      <span key={idx} style={{ whiteSpace: "nowrap" }}>
+                        {p}
+                      </span>
+                    );
+                  });
+                  return (
+                    <Box
+                      key={ev.id}
+                      onClick={(e: React.MouseEvent<HTMLDivElement>) =>
+                        onSelectEvent(ev, e)
+                      }
+                      sx={{
+                        cursor: "pointer",
+                        p: 0.75,
+                        borderRadius: 1,
+                        bgcolor: bg,
+                        color: "text.primary",
+                        fontSize: 12,
+                        fontWeight: 500,
+                        boxShadow: (t) =>
+                          `inset 0 0 0 1px ${t.palette.divider}`,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 0.75,
+                        "&:hover": { filter: "brightness(0.95)" },
+                      }}
+                      title={labelParts
+                        .filter((t) => !t.startsWith("__ICON"))
+                        .join(" · ")}
+                    >
+                      {parts}
+                    </Box>
+                  );
+                })}
+              </Stack>
+            </Box>
+          );
+        })}
+      </Box>
+    </Box>
+  );
+};
+
+// --- Custom Day View (timeline style) ---
+interface CustomDayViewProps {
+  date: Date;
+  events: EntryEvent[];
+  onSelectSlot: (date: Date) => void;
+  onSelectEvent: (evt: EntryEvent, e: React.SyntheticEvent) => void;
+  isDateLocked: (d: Date) => boolean;
+}
+const CustomDayView: React.FC<CustomDayViewProps> = ({
+  date,
+  events,
+  onSelectSlot,
+  onSelectEvent,
+  isDateLocked,
+}) => {
+  const target = new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+    12,
+    0,
+    0,
+    0
+  );
+  const locked = isDateLocked(target);
+  const dayStart = new Date(target);
+  dayStart.setHours(0, 0, 0, 0);
+  const dayEnd = new Date(target);
+  dayEnd.setHours(23, 59, 59, 999);
+  const list = events.filter((ev) => {
+    const s = ev.start as Date;
+    const e = ev.end as Date;
+    return e >= dayStart && s <= dayEnd;
+  });
+  list.sort(
+    (a, b) => (a.start as Date).getTime() - (b.start as Date).getTime()
+  );
+  return (
+    <Box
+      sx={{
+        display: "flex",
+        flexDirection: "column",
+        flex: 1,
+        bgcolor: "background.paper",
+        borderRadius: 2,
+        overflow: "hidden",
+        border: (t) => `1px solid ${t.palette.divider}`,
+      }}
+    >
+      <Box
+        sx={{
+          px: 2,
+          py: 1,
+          borderBottom: (t) => `1px solid ${t.palette.divider}`,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}
+      >
+        <Typography variant="subtitle2" fontWeight={600}>
+          {format(target, "EEEE d MMMM yyyy", { locale: es })}
+        </Typography>
+        {locked && <Chip size="small" color="warning" label="Bloqueado" />}
+      </Box>
+      <Box
+        sx={{
+          flex: 1,
+          overflowY: "auto",
+          p: 1,
+          display: "flex",
+          flexDirection: "column",
+          gap: 1,
+        }}
+      >
+        {list.length === 0 && (
+          <Box
+            onClick={() => !locked && onSelectSlot(target)}
+            sx={{
+              p: 2,
+              border: "1px dashed",
+              borderColor: "divider",
+              borderRadius: 2,
+              textAlign: "center",
+              fontSize: 13,
+              color: "text.secondary",
+              cursor: locked ? "not-allowed" : "pointer",
+              "&:hover": { bgcolor: locked ? "inherit" : "action.hover" },
+            }}
+          >
+            No hay actividades. Haz clic para agregar.
+          </Box>
+        )}
+        {list.map((ev) => {
+          const isCourse = ev.type === "bible_course";
+          const isSacred = ev.type === "sacred_service";
+          const bg = isCourse
+            ? ev.person_color || "warning.light"
+            : isSacred
+            ? "secondary.light"
+            : "primary.light";
+          const s = ev.start as Date;
+          const e = ev.end as Date;
+          const labelParts: string[] = [];
+          if (ev.type === "preaching")
+            labelParts.push("__ICON_MINISTERIO__ Ministerio");
+          if (isCourse) labelParts.push("__ICON_CURSO__ Curso bíblico");
+          if (isSacred) labelParts.push("__ICON_SAGRADO__ Servicio sagrado");
+          if (typeof ev.title === "string") labelParts.push(ev.title);
+          if (!ev.hideTime) {
+            labelParts.push(`${format(s, "HH:mm")} - ${format(e, "HH:mm")}`);
+          }
+          const iconMap: Record<string, React.ReactNode> = {
+            __ICON_MINISTERIO__: (
+              <BusinessCenterOutlinedIcon
+                sx={{ fontSize: 18, color: "text.secondary" }}
+              />
+            ),
+            __ICON_CURSO__: (
+              <MenuBookOutlinedIcon
+                sx={{ fontSize: 18, color: "text.secondary" }}
+              />
+            ),
+            __ICON_SAGRADO__: (
+              <ConstructionOutlinedIcon
+                sx={{ fontSize: 18, color: "text.secondary" }}
+              />
+            ),
+          };
+          const descriptive = labelParts.filter((p) => !p.startsWith("__ICON"));
+          return (
+            <Box
+              key={ev.id}
+              onClick={(evt) => onSelectEvent(ev, evt)}
+              sx={{
+                position: "relative",
+                p: 1,
+                borderRadius: 1,
+                bgcolor: bg,
+                fontSize: 13,
+                fontWeight: 500,
+                boxShadow: (t) => `inset 0 0 0 1px ${t.palette.divider}`,
+                cursor: "pointer",
+                display: "flex",
+                flexDirection: "column",
+                gap: 0.5,
+                "&:hover": { filter: "brightness(0.95)" },
+              }}
+              title={descriptive.join(" · ")}
+            >
+              <Box
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 0.5,
+                  flexWrap: "wrap",
+                }}
+              >
+                {labelParts
+                  .filter((p) => p.startsWith("__ICON"))
+                  .map((tok, i) => (
+                    <span key={i}>{iconMap[tok]}</span>
+                  ))}
+                {descriptive[0] && (
+                  <Typography
+                    component="span"
+                    sx={{ fontSize: 12, fontWeight: 600 }}
+                  >
+                    {descriptive[0]}
+                  </Typography>
+                )}
+                {!ev.hideTime && (
+                  <Typography component="span" sx={{ fontSize: 11 }}>{`${format(
+                    s,
+                    "HH:mm"
+                  )} - ${format(e, "HH:mm")}`}</Typography>
+                )}
+              </Box>
+              {descriptive
+                .slice(1, descriptive.length - (ev.hideTime ? 0 : 1))
+                .map((p, i) => (
+                  <Typography
+                    key={i}
+                    component="span"
+                    sx={{
+                      fontSize: 11,
+                      whiteSpace: "nowrap",
+                      textOverflow: "ellipsis",
+                      overflow: "hidden",
+                    }}
+                  >
+                    {p}
+                  </Typography>
+                ))}
+            </Box>
+          );
+        })}
+      </Box>
+      {!locked && (
+        <Box
+          sx={{
+            p: 1,
+            borderTop: (t) => `1px solid ${t.palette.divider}`,
+            textAlign: "center",
+          }}
+        >
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={() => onSelectSlot(target)}
+          >
+            Agregar actividad
+          </Button>
+        </Box>
+      )}
+    </Box>
+  );
+};
+
+// Eliminamos encabezados personalizados para depuración: usamos los defaults
+
 export default function CalendarView() {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
+  // (Swipe effect will be declared after dependent functions/viewDate)
   const [events, setEvents] = useState<EntryEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -187,7 +1048,13 @@ export default function CalendarView() {
       let startDate: Date;
       let endDate: Date;
       let allDay = false;
-      if (
+      let hideTime = false;
+      if (row.type === "bible_course") {
+        // Curso bíblico: un solo día, sin mostrar horas, anclado al mediodía para evitar problemas DST
+        startDate = new Date(y, m - 1, d, 12, 0, 0, 0);
+        endDate = new Date(startDate.getTime() + 60 * 1000); // duración simbólica mínima
+        hideTime = true;
+      } else if (
         (row.type === "preaching" || row.type === "sacred_service") &&
         st &&
         et
@@ -195,13 +1062,12 @@ export default function CalendarView() {
         startDate = new Date(y, m - 1, d, st.h, st.m);
         endDate = new Date(y, m - 1, d, et.h, et.m);
         if (endDate <= startDate) {
-          // Fallback: treat as at least 1 minute to avoid react-big-calendar rendering issues
           endDate = new Date(startDate.getTime() + 60 * 1000);
         }
       } else {
-        // All-day fallback (previous behavior) including bible_course or preaching sin rango
-        startDate = new Date(y, m - 1, d);
-        endDate = new Date(y, m - 1, d + 1); // exclusive end
+        // preaching sin rango: consideramos día "completo" (visual), pero sin extender al día siguiente real (usar 23:59)
+        startDate = new Date(y, m - 1, d, 0, 0, 0, 0);
+        endDate = new Date(y, m - 1, d, 23, 59, 0, 0);
         allDay = true;
       }
 
@@ -223,7 +1089,7 @@ export default function CalendarView() {
         if (row.type === "bible_course" && personName) return personName;
         if (row.title) return row.title;
         if (row.type === "preaching")
-          return `Predicación${rangeLabel} ${minutesLabel}`.trim();
+          return `Ministerio${rangeLabel} ${minutesLabel}`.trim();
         if (row.type === "sacred_service")
           return `Serv. sagrado${rangeLabel}`.trim();
         return `Curso ${minutesLabel}`.trim();
@@ -239,6 +1105,7 @@ export default function CalendarView() {
         person_id: row.person_id,
         person_name: personName,
         person_color: personColor,
+        hideTime,
       };
     });
     setEvents(mapped);
@@ -412,19 +1279,7 @@ export default function CalendarView() {
       });
   };
 
-  const messages = useMemo(
-    () => ({
-      today: "Hoy",
-      previous: "Atrás",
-      next: "Siguiente",
-      month: "Mes",
-      week: "Semana",
-      day: "Día",
-      agenda: "Agenda",
-      showMore: (total: number) => `+${total} más`,
-    }),
-    []
-  );
+  // messages removed (custom toolbar handles labels)
 
   // Metrics derived from events + viewDate (month scope)
   const metrics = useMemo(() => {
@@ -455,6 +1310,8 @@ export default function CalendarView() {
   };
   const goToday = () => setViewDate(new Date());
 
+  // Swipe deshabilitado (se retiraron los listeners por problemas con el Navbar)
+
   if (loading) return <Box p={2}>Cargando...</Box>;
   if (errorMsg)
     return (
@@ -465,12 +1322,14 @@ export default function CalendarView() {
 
   return (
     <Box
+      id="calendar-root-container"
       sx={{
-        height: "calc(100vh - 64px)",
-        p: 3,
+        height: { md: "calc(100vh - 64px)" },
+        minHeight: { xs: "100dvh" },
+        p: { xs: 1, md: 3 },
         display: "flex",
         flexDirection: "column",
-        gap: 3,
+        gap: { xs: 1, md: 3 },
       }}
     >
       <Stack spacing={2}>
@@ -492,94 +1351,72 @@ export default function CalendarView() {
         >
           Calendario {metrics.monthLabel}
         </Box>
-        <Stack
-          direction="row"
-          flexWrap="wrap"
-          alignItems="center"
-          justifyContent="space-between"
-          gap={1}
-        >
-          <Stack direction="row" spacing={1} alignItems="center">
-            <Tooltip title="Mes anterior">
-              <IconButton
+        {isMobile ? (
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+            <Chip
+              label={`Ministerio: ${Math.floor(
+                metrics.preachingMinutes / 60
+              )}h ${metrics.preachingMinutes % 60}m`}
+              size="small"
+              color="primary"
+              variant="outlined"
+            />
+            <Chip
+              label={`Cursos: ${metrics.distinctPersons}`}
+              size="small"
+              color="secondary"
+              variant="outlined"
+            />
+            {isDateLocked(viewDate) && (
+              <Chip
+                label="Mes cerrado"
                 size="small"
-                onClick={goPrevMonth}
-                aria-label="Mes anterior (Alt + Flecha izquierda)"
-              >
-                <ArrowBackIosNewIcon fontSize="inherit" />
-              </IconButton>
-            </Tooltip>
-            <Tooltip title="Hoy">
-              <IconButton
-                size="small"
-                onClick={goToday}
-                aria-label="Ir a hoy (Alt + T)"
-              >
-                <TodayIcon fontSize="inherit" />
-              </IconButton>
-            </Tooltip>
-            <Tooltip title="Mes siguiente">
-              <IconButton
-                size="small"
-                onClick={goNextMonth}
-                aria-label="Mes siguiente (Alt + Flecha derecha)"
-              >
-                <ArrowForwardIosIcon fontSize="inherit" />
-              </IconButton>
-            </Tooltip>
+                color="warning"
+                variant="filled"
+              />
+            )}
           </Stack>
-          <Typography
-            variant="h6"
-            sx={{ fontWeight: 600, textTransform: "capitalize" }}
-          >
-            {metrics.monthLabel}
-          </Typography>
-          <Typography
-            variant="caption"
-            sx={{ opacity: 0.7, display: { xs: "none", sm: "inline" } }}
-          >
-            Vista mensual
-          </Typography>
-        </Stack>
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
-          <Card sx={{ flex: 1, minWidth: 220 }} variant="outlined">
-            <CardContent>
-              <Typography variant="overline" sx={{ lineHeight: 1 }}>
-                Tiempo predicación (mes)
-              </Typography>
-              <Typography variant="h6" fontWeight={600}>
-                {Math.floor(metrics.preachingMinutes / 60)}h{" "}
-                {metrics.preachingMinutes % 60}m
-              </Typography>
-              {isDateLocked(viewDate) && (
-                <Chip
-                  label="Mes cerrado"
-                  size="small"
-                  color="warning"
-                  sx={{ mt: 1, fontWeight: 600 }}
-                />
-              )}
-            </CardContent>
-          </Card>
-          <Card sx={{ flex: 1, minWidth: 180 }} variant="outlined">
-            <CardContent>
-              <Typography variant="overline" sx={{ lineHeight: 1 }}>
-                Cursos bíblicos distintos
-              </Typography>
-              <Typography variant="h6" fontWeight={600}>
-                {metrics.distinctPersons}
-              </Typography>
-              {isDateLocked(viewDate) && (
-                <Chip
-                  label="Bloqueado"
-                  size="small"
-                  color="warning"
-                  sx={{ mt: 1, fontWeight: 600 }}
-                />
-              )}
-            </CardContent>
-          </Card>
-        </Stack>
+        ) : (
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+            <Card sx={{ flex: 1, minWidth: 220 }} variant="outlined">
+              <CardContent>
+                <Typography variant="overline" sx={{ lineHeight: 1 }}>
+                  Tiempo en ministerio (mes)
+                </Typography>
+                <Typography variant="h6" fontWeight={600}>
+                  {Math.floor(metrics.preachingMinutes / 60)}h{" "}
+                  {metrics.preachingMinutes % 60}m
+                </Typography>
+                {isDateLocked(viewDate) && (
+                  <Chip
+                    label="Mes cerrado"
+                    size="small"
+                    color="warning"
+                    sx={{ mt: 1, fontWeight: 600 }}
+                  />
+                )}
+              </CardContent>
+            </Card>
+            <Card sx={{ flex: 1, minWidth: 180 }} variant="outlined">
+              <CardContent>
+                <Typography variant="overline" sx={{ lineHeight: 1 }}>
+                  Cursos bíblicos distintos
+                </Typography>
+                <Typography variant="h6" fontWeight={600}>
+                  {metrics.distinctPersons}
+                </Typography>
+                {isDateLocked(viewDate) && (
+                  <Chip
+                    label="Bloqueado"
+                    size="small"
+                    color="warning"
+                    sx={{ mt: 1, fontWeight: 600 }}
+                  />
+                )}
+              </CardContent>
+            </Card>
+          </Stack>
+        )}
       </Stack>
       {events.length === 0 && (
         <Box
@@ -615,63 +1452,107 @@ export default function CalendarView() {
         sx={{
           flex: 1,
           minHeight: 0,
+          display: "flex",
+          flexDirection: "column",
+          "& .rbc-calendar": {
+            flex: 1,
+            minHeight: 0,
+            display: "flex",
+            flexDirection: "column",
+            height: "100%",
+          },
           "& .rbc-month-view": {
             bgcolor: "background.paper",
             borderRadius: 2,
             overflow: "hidden",
+            flex: 1,
+            minHeight: 0,
           },
           borderRadius: 2,
           outline: "none",
           "&:focus-visible": {
             boxShadow: (t) => `0 0 0 3px ${t.palette.primary.main}40`,
           },
+          // Ajuste móvil: permite que el calendario use el espacio restante sin forzar scroll extra
+          height: { xs: "100%" },
         }}
       >
-        <Calendar
-          localizer={localizer}
-          events={events}
-          startAccessor="start"
-          endAccessor="end"
-          selectable
-          onSelectSlot={onSelectSlot}
-          onSelectEvent={(event, e) => onSelectEvent(event as EntryEvent, e)}
-          views={["month", "week", "day"]}
-          messages={messages}
-          date={viewDate}
-          onNavigate={(d) => setViewDate(d as Date)}
-          view={currentView}
-          onView={(v) => setCurrentView(v)}
-          eventPropGetter={(event) => {
-            const isCourse = event.type === "bible_course";
-            const style: React.CSSProperties = {};
-            if (isCourse && event.person_color) {
-              style.background = event.person_color;
-              style.border = "1px solid rgba(0,0,0,0.15)";
-              style.color = "#222";
-              style.fontWeight = 600;
-            }
-            const cls = isCourse
-              ? "event-bible_course"
-              : event.type === "sacred_service"
-              ? "event-sacred_service"
-              : "event-preaching";
-            // Añadimos título accesible (aria-label a través de title para fallback) con tipo y duración si aplica
-            const labelParts: string[] = [];
-            if (event.type === "preaching") labelParts.push("Predicación");
-            if (event.type === "bible_course") labelParts.push("Curso bíblico");
-            if (event.type === "sacred_service")
-              labelParts.push("Servicio sagrado");
-            if (typeof event.title === "string") labelParts.push(event.title);
-            if (!event.allDay) {
-              const start = event.start as Date;
-              const end = event.end as Date;
-              labelParts.push(
-                `${format(start, "HH:mm")} - ${format(end, "HH:mm")}`
-              );
-            }
-            return { className: cls, style, title: labelParts.join(" · ") };
+        <Box
+          id="calendar-swipe-surface"
+          sx={{
+            flex: 1,
+            display: "flex",
+            flexDirection: "column",
+            minHeight: 0,
           }}
-        />
+        >
+          <UnifiedToolbar
+            date={viewDate}
+            view={currentView as View}
+            onView={(v) => setCurrentView(v)}
+            onNavigate={(action) => {
+              if (action === "TODAY") {
+                const today = new Date();
+                setViewDate(today);
+                return;
+              }
+              const delta = action === "PREV" ? -1 : 1;
+              let newDate = viewDate;
+              if (currentView === "month") newDate = addMonths(viewDate, delta);
+              else if (currentView === "week")
+                newDate = addWeeks(viewDate, delta);
+              else if (currentView === "day")
+                newDate = addDays(viewDate, delta);
+              setViewDate(newDate);
+            }}
+          />
+          {currentView === "month" ? (
+            <CustomMonthGrid
+              viewDate={viewDate}
+              events={events}
+              onSelectDay={(d) =>
+                onSelectSlot({
+                  start: d,
+                  end: d,
+                  action: "click",
+                  slots: [d],
+                } as unknown as SlotInfo)
+              }
+              onSelectEvent={(evt, e) => onSelectEvent(evt, e)}
+              isDateLocked={isDateLocked}
+            />
+          ) : currentView === "week" ? (
+            <CustomWeekGrid
+              viewDate={viewDate}
+              events={events}
+              onSelectDay={(d) =>
+                onSelectSlot({
+                  start: d,
+                  end: d,
+                  action: "click",
+                  slots: [d],
+                } as unknown as SlotInfo)
+              }
+              onSelectEvent={(evt, e) => onSelectEvent(evt, e)}
+              isDateLocked={isDateLocked}
+            />
+          ) : (
+            <CustomDayView
+              date={viewDate}
+              events={events}
+              onSelectSlot={(d) =>
+                onSelectSlot({
+                  start: d,
+                  end: d,
+                  action: "click",
+                  slots: [d],
+                } as unknown as SlotInfo)
+              }
+              onSelectEvent={(evt, e) => onSelectEvent(evt, e)}
+              isDateLocked={isDateLocked}
+            />
+          )}
+        </Box>
         {/* Instrucciones ocultas para navegación por teclado */}
         <Box
           id="calendar-instructions"
