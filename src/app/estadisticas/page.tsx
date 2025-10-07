@@ -294,7 +294,15 @@ export default function EstadisticasPage() {
           .eq("id", editingSchool.id)
           .select("id, school_date, hours, title, created_at")
           .single();
-        if (error) throw error;
+        if (error) {
+          const pgCode = (error as { code?: string }).code;
+          if (pgCode === "23514") {
+            throw new Error(
+              "Las horas no cumplen la restricción en la base de datos. Asegúrate de que sea un entero positivo."
+            );
+          }
+          throw error;
+        }
         setSchoolHours((prev) =>
           prev
             .map((r) =>
@@ -308,7 +316,15 @@ export default function EstadisticasPage() {
           .insert(payload)
           .select("id, school_date, hours, title, created_at")
           .single();
-        if (error) throw error;
+        if (error) {
+          const pgCode = (error as { code?: string }).code;
+          if (pgCode === "23514") {
+            throw new Error(
+              "Las horas no cumplen la restricción en la base de datos. Asegúrate de que sea un entero positivo."
+            );
+          }
+          throw error;
+        }
         setSchoolHours((prev) =>
           [...prev, data as SchoolHourRow].sort((a, b) =>
             b.school_date.localeCompare(a.school_date)
