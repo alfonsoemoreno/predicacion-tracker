@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/lib/supabaseClient";
@@ -83,6 +84,9 @@ export default function InformesPage() {
   const [recalcLoading, setRecalcLoading] = useState(false);
   const [actionsAnchor, setActionsAnchor] = useState<null | HTMLElement>(null);
   const actionsMenuOpen = Boolean(actionsAnchor);
+  const [unlockModalOpen, setUnlockModalOpen] = useState(false);
+  const [unlockedMonthIdx, setUnlockedMonthIdx] = useState<number | null>(null);
+  const router = useRouter();
 
   const openActionsMenu = (e: React.MouseEvent<HTMLElement>) => {
     setActionsAnchor(e.currentTarget);
@@ -101,9 +105,8 @@ export default function InformesPage() {
       const updated = await unlockReport(last.id);
       setReports((rs) => rs.map((r) => (r.id === updated.id ? updated : r)));
       setRecalcFromIdx(last.month_index);
-      alert(
-        "Mes desbloqueado. Añade/edita actividades y luego usa 'Recalcular' para cerrar nuevamente."
-      );
+      setUnlockedMonthIdx(last.month_index);
+      setUnlockModalOpen(true);
     } catch (e: unknown) {
       const raw = e instanceof Error ? e.message : String(e);
       let friendly = raw;
@@ -120,7 +123,7 @@ export default function InformesPage() {
         friendly =
           "No puedes modificar métricas estando cerrado. Primero desbloquea (debe funcionar con la migración nueva).";
       }
-      alert(friendly);
+      alert(friendly); // mantener alert para errores por ahora
       console.error(raw);
     } finally {
       setUnlocking(null);
@@ -1013,6 +1016,57 @@ export default function InformesPage() {
               disabled={recalcLoading}
             >
               {recalcLoading ? "Recalculando..." : "Confirmar"}
+            </Button>
+          </DialogActions>
+        </Dialog>
+        {/* Dialog éxito desbloqueo */}
+        <Dialog
+          open={unlockModalOpen}
+          onClose={() => setUnlockModalOpen(false)}
+          fullWidth
+          maxWidth="sm"
+        >
+          <DialogTitle>Mes desbloqueado</DialogTitle>
+          <DialogContent>
+            <Stack spacing={2} sx={{ mt: 1 }}>
+              <Alert severity="success" variant="outlined" icon={false}>
+                {unlockedMonthIdx != null ? (
+                  <>
+                    <strong style={{ textTransform: "capitalize" }}>
+                      {monthName(unlockedMonthIdx)}
+                    </strong>{" "}
+                    ahora está abierto.
+                  </>
+                ) : (
+                  <>El mes seleccionado ahora está abierto.</>
+                )}
+              </Alert>
+              <Typography
+                variant="body2"
+                sx={{ opacity: 0.85, lineHeight: 1.5 }}
+              >
+                Ya puedes agregar o editar actividades de ese mes en el
+                calendario. Cuando termines, vuelve a esta pantalla y pulsa{" "}
+                <strong>Recalcular</strong> para cerrar nuevamente el mes y
+                actualizar las horas y minutos acumulados.
+              </Typography>
+              <Alert severity="info" icon={false} sx={{ fontSize: 13 }}>
+                Las cifras del informe no cambian hasta que ejecutes el
+                recálculo. Sólo los registros nuevos o editados se guardan y se
+                tendrán en cuenta al recalcular.
+              </Alert>
+            </Stack>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setUnlockModalOpen(false)}>Cerrar</Button>
+            <Button
+              variant="contained"
+              onClick={() => {
+                setUnlockModalOpen(false);
+                router.push("/");
+              }}
+            >
+              Ir al calendario
             </Button>
           </DialogActions>
         </Dialog>
