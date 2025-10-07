@@ -1036,11 +1036,20 @@ export default function CalendarView() {
       setLoading(false);
       return;
     }
+    // Calcular fecha límite (últimos 18 meses desde hoy)
+    const today = new Date();
+    const cutoff = new Date(
+      today.getFullYear(),
+      today.getMonth() - 18,
+      today.getDate()
+    );
+    const cutoffStr = cutoff.toISOString().slice(0, 10);
     const { data, error } = await supabase
       .from("activity_entries")
       .select(
         "id, activity_date, minutes, type, title, person_id, start_time, end_time, persons:person_id ( name, color )"
       )
+      .gte("activity_date", cutoffStr)
       .order("activity_date", { ascending: true });
     if (error) {
       setErrorMsg(error.message);
@@ -1264,6 +1273,19 @@ export default function CalendarView() {
 
   const onSelectSlot = async (slot: SlotInfo) => {
     const date = slot.start as Date;
+    // Bloquear creación si fecha menor al límite de 18 meses
+    const minAllowed = new Date();
+    minAllowed.setMonth(minAllowed.getMonth() - 18);
+    minAllowed.setHours(0, 0, 0, 0);
+    if (date < minAllowed) {
+      setSnackbar({
+        open: true,
+        message:
+          "Solo se pueden registrar actividades dentro de los últimos 18 meses",
+        severity: "error",
+      });
+      return;
+    }
     if (isDateLocked(date)) {
       setSnackbar({
         open: true,
@@ -1593,9 +1615,35 @@ export default function CalendarView() {
                 newDate = addWeeks(viewDate, delta);
               else if (currentView === "day")
                 newDate = addDays(viewDate, delta);
+              // Limitar a últimos 18 meses
+              const minAllowed = new Date();
+              minAllowed.setMonth(minAllowed.getMonth() - 18);
+              minAllowed.setHours(0, 0, 0, 0);
+              if (newDate < minAllowed) {
+                setSnackbar({
+                  open: true,
+                  message: "No puedes navegar más allá de los últimos 18 meses",
+                  severity: "error",
+                });
+                return;
+              }
               setViewDate(newDate);
             }}
           />
+          {(() => {
+            const minAllowed = new Date();
+            minAllowed.setMonth(minAllowed.getMonth() - 18);
+            minAllowed.setHours(0, 0, 0, 0);
+            if (viewDate < minAllowed) {
+              return (
+                <Alert severity="info" sx={{ mb: 1 }}>
+                  Solo se muestran y permiten registros dentro de los últimos 18
+                  meses.
+                </Alert>
+              );
+            }
+            return null;
+          })()}
           {currentView === "month" ? (
             <CustomMonthGrid
               viewDate={viewDate}
