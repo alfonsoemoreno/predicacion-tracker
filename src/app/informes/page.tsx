@@ -113,6 +113,12 @@ export default function InformesPage() {
       } else if (raw.includes("row-level security")) {
         friendly =
           "RLS impide la acción. Falta una policy UPDATE para monthly_reports.";
+      } else if (raw.includes("SOLO_COMMENTS_EDITABLE")) {
+        friendly =
+          "El trigger actual solo permite editar comentarios. Aplica la nueva migración (allow_unlock_and_recalc) para permitir desbloqueo.";
+      } else if (raw.includes("SOLO_COMMENTS_O_UNLOCK")) {
+        friendly =
+          "No puedes modificar métricas estando cerrado. Primero desbloquea (debe funcionar con la migración nueva).";
       }
       alert(friendly);
       console.error(raw);
