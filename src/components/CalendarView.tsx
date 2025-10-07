@@ -1175,12 +1175,50 @@ export default function CalendarView() {
       try {
         const baseYear = computeTheocraticYearBase(viewDate);
         const reports = await fetchReports(baseYear);
-        setLockedMonthIndexes(reports.map((r) => r.month_index));
+        // Solo marcar como bloqueados los que realmente tienen locked=true
+        setLockedMonthIndexes(
+          reports.filter((r) => r.locked).map((r) => r.month_index)
+        );
       } catch {
         // ignore silently
       }
     };
     loadLocked();
+  }, [viewDate]);
+
+  // Suscripción en tiempo real a cambios en monthly_reports para actualizar bloqueos al desbloquear / recalcular
+  useEffect(() => {
+    let active = true;
+    const subscribe = async () => {
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session) return;
+      const channel = supabase
+        .channel("monthly_reports_changes")
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "monthly_reports" },
+          async () => {
+            if (!active) return;
+            try {
+              const baseYear = computeTheocraticYearBase(viewDate);
+              const reports = await fetchReports(baseYear);
+              setLockedMonthIndexes(
+                reports.filter((r) => r.locked).map((r) => r.month_index)
+              );
+            } catch {
+              /* noop */
+            }
+          }
+        )
+        .subscribe();
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    };
+    subscribe();
+    return () => {
+      active = false;
+    };
   }, [viewDate]);
 
   const isDateLocked = (date: Date | null | undefined) => {
