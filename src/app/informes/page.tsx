@@ -122,6 +122,9 @@ export default function InformesPage() {
       } else if (raw.includes("SOLO_COMMENTS_O_UNLOCK")) {
         friendly =
           "No puedes modificar métricas estando cerrado. Primero desbloquea (debe funcionar con la migración nueva).";
+      } else if (raw.includes("REPORT_TOO_OLD_TO_UNLOCK")) {
+        friendly =
+          "Este informe es demasiado antiguo (más de 18 meses) y no puede desbloquearse porque sus registros base fueron purgados.";
       }
       alert(friendly); // mantener alert para errores por ahora
       console.error(raw);
