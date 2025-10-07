@@ -14,7 +14,18 @@ import {
   Snackbar,
   Alert,
   Grid,
+  Button,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField,
+  IconButton,
+  Tooltip,
+  Chip,
 } from "@mui/material";
+import AddIcon from "@mui/icons-material/Add";
+import DeleteIcon from "@mui/icons-material/Delete";
 
 interface EntryRow {
   activity_date: string; // yyyy-mm-dd
@@ -23,6 +34,14 @@ interface EntryRow {
   start_time?: string | null;
   end_time?: string | null;
   title?: string | null;
+}
+
+interface SchoolHourRow {
+  id: string;
+  school_date: string;
+  hours: number;
+  title: string;
+  created_at: string;
 }
 
 // Theocratic year: starts September (month 8 zero-based) ends next year August.
@@ -44,6 +63,13 @@ export default function EstadisticasPage() {
     open: false,
     message: "",
   });
+  const [schoolHours, setSchoolHours] = useState<SchoolHourRow[]>([]);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [schoolTitle, setSchoolTitle] = useState("");
+  const [schoolHoursValue, setSchoolHoursValue] = useState<number>(1);
+  const [savingSchool, setSavingSchool] = useState(false);
+  const [schoolError, setSchoolError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const now = useMemo(() => new Date(), []);
   const { start, end, startYear } = useMemo(
     () => getTheocraticYear(now),
@@ -56,6 +82,7 @@ export default function EstadisticasPage() {
       const { data: sessionData } = await supabase.auth.getSession();
       if (!sessionData.session) {
         setRows([]);
+        setSchoolHours([]);
         return;
       }
       const { data, error } = await supabase
@@ -68,6 +95,13 @@ export default function EstadisticasPage() {
       } else {
         setRows((data as EntryRow[]) || []);
       }
+      const { data: schoolData } = await supabase
+        .from("school_hours")
+        .select("id, school_date, hours, title, created_at")
+        .gte("school_date", start.toISOString().slice(0, 10))
+        .lt("school_date", end.toISOString().slice(0, 10))
+        .order("school_date", { ascending: true });
+      if (schoolData) setSchoolHours(schoolData as SchoolHourRow[]);
     };
     load();
   }, [start, end]);
@@ -90,9 +124,11 @@ export default function EstadisticasPage() {
     const sacredMinutesYear = rows
       .filter((r) => r.type === "sacred_service")
       .reduce((acc, r) => acc + coerce(r), 0);
-    const hoursYear = preachingMinutesYear / 60;
-    const sacredHoursYear = sacredMinutesYear / 60;
-    const combinedHoursYear = (preachingMinutesYear + sacredMinutesYear) / 60;
+    const hoursYear = preachingMinutesYear / 60; // ministerio
+    const sacredHoursYear = sacredMinutesYear / 60; // servicio sagrado
+    const schoolHoursTotal = schoolHours.reduce((a, r) => a + r.hours, 0); // escuelas (horas enteras)
+    const annualCountableHours = hoursYear + schoolHoursTotal; // meta anual considera ministerio + escuelas
+    const combinedHoursYear = hoursYear + sacredHoursYear + schoolHoursTotal; // referencia total
     const monthsElapsed = (() => {
       // Count how many full or partial months in range up to now (inclusive current month if in range)
       const months: Date[] = [];
@@ -104,14 +140,20 @@ export default function EstadisticasPage() {
       return months.length;
     })();
     const expectedHoursSoFar = MONTHLY_GOAL_AVG * monthsElapsed;
-    const hoursRemainingAnnual = Math.max(0, ANNUAL_GOAL_HOURS - hoursYear);
+    const hoursRemainingAnnual = Math.max(
+      0,
+      ANNUAL_GOAL_HOURS - annualCountableHours
+    );
     const hoursBehindMonthlyAverage = Math.max(
       0,
-      expectedHoursSoFar - hoursYear
+      expectedHoursSoFar - annualCountableHours
     );
     const monthlyAverageCurrent =
-      monthsElapsed > 0 ? hoursYear / monthsElapsed : 0;
-    const pctAnnual = Math.min(100, (hoursYear / ANNUAL_GOAL_HOURS) * 100);
+      monthsElapsed > 0 ? annualCountableHours / monthsElapsed : 0;
+    const pctAnnual = Math.min(
+      100,
+      (annualCountableHours / ANNUAL_GOAL_HOURS) * 100
+    );
     const pctMonthlyTrack =
       expectedHoursSoFar > 0
         ? Math.min(100, (hoursYear / expectedHoursSoFar) * 100)
@@ -119,6 +161,8 @@ export default function EstadisticasPage() {
     return {
       hoursYear,
       sacredHoursYear,
+      schoolHoursTotal,
+      annualCountableHours,
       combinedHoursYear,
       hoursRemainingAnnual,
       hoursBehindMonthlyAverage,
@@ -128,7 +172,7 @@ export default function EstadisticasPage() {
       pctAnnual,
       pctMonthlyTrack,
     };
-  }, [rows, start, end, now]);
+  }, [rows, schoolHours, start, end, now]);
 
   // Trigger congratulation notifications when crossing goals (once per cycle)
   useEffect(() => {
@@ -167,7 +211,66 @@ export default function EstadisticasPage() {
         }
       }
     } catch {}
-  }, [metrics.hoursYear, rows, start, now]);
+  }, [metrics.hoursYear, metrics.annualCountableHours, rows, start, now]);
+
+  const handleAddSchool = async () => {
+    setSchoolError(null);
+    if (!schoolTitle.trim()) {
+      setSchoolError("Título requerido");
+      return;
+    }
+    if (schoolHoursValue <= 0) {
+      setSchoolError("Horas debe ser > 0");
+      return;
+    }
+    setSavingSchool(true);
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (!sessionData.session) {
+      setSchoolError("Sesión expirada");
+      setSavingSchool(false);
+      return;
+    }
+    try {
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const payload = {
+        user_id: sessionData.session.user.id,
+        school_date: todayStr,
+        hours: schoolHoursValue,
+        title: schoolTitle.trim(),
+      };
+      const { data, error } = await supabase
+        .from("school_hours")
+        .insert(payload)
+        .select("id, school_date, hours, title, created_at")
+        .single();
+      if (error) throw error;
+      setSchoolHours((prev) => [...prev, data as SchoolHourRow]);
+      setDialogOpen(false);
+      setSchoolTitle("");
+      setSchoolHoursValue(1);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Error guardando";
+      setSchoolError(msg);
+    } finally {
+      setSavingSchool(false);
+    }
+  };
+
+  const handleDeleteSchool = async (id: string) => {
+    setDeletingId(id);
+    try {
+      const { error } = await supabase
+        .from("school_hours")
+        .delete()
+        .eq("id", id);
+      if (error) throw error;
+      setSchoolHours((prev) => prev.filter((r) => r.id !== id));
+    } catch {
+      setSnackbar({ open: true, message: "Error eliminando registro" });
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   return (
     <AuthGuard>
@@ -182,9 +285,27 @@ export default function EstadisticasPage() {
           gap: 3,
         }}
       >
-        <Typography variant="h5" fontWeight={700}>
-          Estadísticas año teocrático {startYear}-{startYear + 1}
-        </Typography>
+        <Stack
+          direction="row"
+          justifyContent="space-between"
+          alignItems="center"
+          flexWrap="wrap"
+          gap={2}
+        >
+          <Typography variant="h5" fontWeight={700}>
+            Estadísticas año teocrático {startYear}-{startYear + 1}
+          </Typography>
+          <Tooltip title="Registrar horas de una Escuela" arrow>
+            <Button
+              startIcon={<AddIcon />}
+              variant="contained"
+              size="small"
+              onClick={() => setDialogOpen(true)}
+            >
+              Agregar Escuela
+            </Button>
+          </Tooltip>
+        </Stack>
         {error && (
           <Card variant="outlined">
             <CardContent>
@@ -197,7 +318,7 @@ export default function EstadisticasPage() {
             <Card variant="outlined" sx={{ height: "100%" }}>
               <CardContent>
                 <Typography variant="overline" sx={{ fontWeight: 600 }}>
-                  Horas acumuladas
+                  Horas ministerio (h)
                 </Typography>
                 <Typography variant="h4" fontWeight={700}>
                   {metrics.hoursYear.toFixed(1)}
@@ -223,13 +344,13 @@ export default function EstadisticasPage() {
             <Card variant="outlined" sx={{ height: "100%" }}>
               <CardContent>
                 <Typography variant="overline" sx={{ fontWeight: 600 }}>
-                  Faltan para meta anual
+                  Horas escuelas (h)
                 </Typography>
                 <Typography variant="h4" fontWeight={700}>
-                  {Math.max(0, metrics.hoursRemainingAnnual).toFixed(1)}
+                  {metrics.schoolHoursTotal.toFixed(1)}
                 </Typography>
                 <Typography variant="caption" sx={{ opacity: 0.7 }}>
-                  Si completas llegas a 600h
+                  Suma a meta anual
                 </Typography>
               </CardContent>
             </Card>
@@ -253,13 +374,13 @@ export default function EstadisticasPage() {
             <Card variant="outlined" sx={{ height: "100%" }}>
               <CardContent>
                 <Typography variant="overline" sx={{ fontWeight: 600 }}>
-                  Total combinado (h)
+                  Meta anual (progreso)
                 </Typography>
                 <Typography variant="h4" fontWeight={700}>
-                  {metrics.combinedHoursYear.toFixed(1)}
+                  {metrics.annualCountableHours.toFixed(1)}
                 </Typography>
                 <Typography variant="caption" sx={{ opacity: 0.7 }}>
-                  Ministerio + Servicio sagrado
+                  Ministerio + Escuelas (meta 600h)
                 </Typography>
               </CardContent>
             </Card>
@@ -312,11 +433,72 @@ export default function EstadisticasPage() {
             </Card>
           </Grid>
         </Grid>
+        <Grid item xs={12} md={12}>
+          <Card variant="outlined">
+            <CardContent>
+              <Stack
+                direction="row"
+                justifyContent="space-between"
+                alignItems="center"
+                mb={1}
+              >
+                <Typography variant="subtitle2" fontWeight={600}>
+                  Registro de Escuelas (año)
+                </Typography>
+                <Chip
+                  label={`Total: ${metrics.schoolHoursTotal.toFixed(1)}h`}
+                  size="small"
+                  color="primary"
+                />
+              </Stack>
+              {schoolHours.length === 0 && (
+                <Typography variant="body2" sx={{ opacity: 0.7 }}>
+                  Sin registros todavía.
+                </Typography>
+              )}
+              <Stack spacing={1} mt={1}>
+                {schoolHours.map((s) => (
+                  <Stack
+                    key={s.id}
+                    direction="row"
+                    spacing={2}
+                    alignItems="center"
+                    sx={{
+                      p: 1,
+                      border: (t) => `1px solid ${t.palette.divider}`,
+                      borderRadius: 1,
+                    }}
+                  >
+                    <Box sx={{ flex: 1 }}>
+                      <Typography variant="body2" fontWeight={600}>
+                        {s.title}
+                      </Typography>
+                      <Typography variant="caption" sx={{ opacity: 0.7 }}>
+                        {s.school_date} · {s.hours}h
+                      </Typography>
+                    </Box>
+                    <Tooltip title="Eliminar" arrow>
+                      <span>
+                        <IconButton
+                          size="small"
+                          onClick={() => handleDeleteSchool(s.id)}
+                          disabled={deletingId === s.id}
+                        >
+                          <DeleteIcon fontSize="inherit" />
+                        </IconButton>
+                      </span>
+                    </Tooltip>
+                  </Stack>
+                ))}
+              </Stack>
+            </CardContent>
+          </Card>
+        </Grid>
         <Divider />
         <Typography variant="body2" sx={{ opacity: 0.7 }}>
-          Año teocrático: septiembre a agosto. La meta anual (600h) sólo cuenta
-          el ministerio. “Servicio sagrado” se informa aparte y también aparece
-          el total combinado para referencia.
+          Año teocrático: septiembre a agosto. La meta anual (600h) cuenta
+          Ministerio + Escuelas. El Servicio Sagrado se muestra aparte y no suma
+          a la meta, pero se incluye en el Total combinado.
         </Typography>
       </Box>
       <Snackbar
@@ -334,6 +516,56 @@ export default function EstadisticasPage() {
           {snackbar.message}
         </Alert>
       </Snackbar>
+      <Dialog
+        open={dialogOpen}
+        onClose={() => !savingSchool && setDialogOpen(false)}
+        fullWidth
+        maxWidth="xs"
+      >
+        <DialogTitle>Agregar horas de Escuela</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField
+              label="Título / Escuela"
+              value={schoolTitle}
+              onChange={(e) => setSchoolTitle(e.target.value)}
+              fullWidth
+              size="small"
+              autoFocus
+            />
+            <TextField
+              label="Horas"
+              type="number"
+              value={schoolHoursValue}
+              onChange={(e) => setSchoolHoursValue(Number(e.target.value))}
+              inputProps={{ min: 1, max: 24, step: 1 }}
+              size="small"
+              fullWidth
+            />
+            {schoolError && (
+              <Alert severity="error" variant="outlined">
+                {schoolError}
+              </Alert>
+            )}
+            <Alert severity="info" variant="outlined">
+              Estas horas se suman a la meta anual (600h) junto con el
+              ministerio. No se incluyen en informes mensuales.
+            </Alert>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDialogOpen(false)} disabled={savingSchool}>
+            Cancelar
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleAddSchool}
+            disabled={savingSchool}
+          >
+            {savingSchool ? "Guardando..." : "Guardar"}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </AuthGuard>
   );
 }
