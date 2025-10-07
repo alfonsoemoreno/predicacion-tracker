@@ -194,6 +194,17 @@ export async function generateMonthlyReportSequential(
 
 // Desbloquear un informe mensual para permitir agregar / editar actividades
 export async function unlockReport(reportId: string) {
+  // Intentar vía RPC (si la función existe) para validar que sea el último mes
+  try {
+    const { data: rpcData, error: rpcErr } = await supabase.rpc(
+      "unlock_last_report",
+      { report_id: reportId }
+    );
+    if (!rpcErr && rpcData) return rpcData as MonthlyReportRow;
+    // Si la función no existe o dio error distinto, continuar fallback
+  } catch {
+    // ignorar y usar fallback
+  }
   const { data, error } = await supabase
     .from("monthly_reports")
     .update({ locked: false })
