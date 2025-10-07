@@ -23,9 +23,14 @@ import {
   IconButton,
   Tooltip,
   Chip,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
 import DeleteIcon from "@mui/icons-material/Delete";
+import EditIcon from "@mui/icons-material/Edit";
 
 interface EntryRow {
   activity_date: string; // yyyy-mm-dd
@@ -57,24 +62,41 @@ const ANNUAL_GOAL_HOURS = 600;
 const MONTHLY_GOAL_AVG = ANNUAL_GOAL_HOURS / 12; // 50
 
 export default function EstadisticasPage() {
-  const [rows, setRows] = useState<EntryRow[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string }>({
-    open: false,
-    message: "",
-  });
-  const [schoolHours, setSchoolHours] = useState<SchoolHourRow[]>([]);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [schoolTitle, setSchoolTitle] = useState("");
-  const [schoolHoursValue, setSchoolHoursValue] = useState<number>(1);
-  const [savingSchool, setSavingSchool] = useState(false);
-  const [schoolError, setSchoolError] = useState<string | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  // Fechas base
   const now = useMemo(() => new Date(), []);
   const { start, end, startYear } = useMemo(
     () => getTheocraticYear(now),
     [now]
   );
+
+  // Estado datos
+  const [rows, setRows] = useState<EntryRow[]>([]);
+  const [schoolHours, setSchoolHours] = useState<SchoolHourRow[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  // Métricas / feedback
+  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string }>({
+    open: false,
+    message: "",
+  });
+
+  // Diálogo Escuelas
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingSchool, setEditingSchool] = useState<SchoolHourRow | null>(
+    null
+  );
+  const [schoolTitle, setSchoolTitle] = useState("");
+  const [schoolHoursValue, setSchoolHoursValue] = useState<number>(1);
+  const [savingSchool, setSavingSchool] = useState(false);
+  const [schoolError, setSchoolError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [selectedMonthIdx, setSelectedMonthIdx] = useState<number>(() => {
+    // Índice 0..11 relativo al inicio teocrático (start)
+    const idx =
+      (now.getFullYear() - start.getFullYear()) * 12 +
+      (now.getMonth() - start.getMonth());
+    return idx < 0 ? 0 : idx > 11 ? 11 : idx;
+  });
 
   useEffect(() => {
     const load = async () => {
@@ -213,16 +235,36 @@ export default function EstadisticasPage() {
     } catch {}
   }, [metrics.hoursYear, metrics.annualCountableHours, rows, start, now]);
 
-  const handleAddSchool = async () => {
+  const openAddDialog = () => {
+    setEditingSchool(null);
+    setSchoolTitle("");
+    setSchoolHoursValue(1);
+    const idx =
+      (now.getFullYear() - start.getFullYear()) * 12 +
+      (now.getMonth() - start.getMonth());
+    setSelectedMonthIdx(idx < 0 ? 0 : idx > 11 ? 11 : idx);
     setSchoolError(null);
-    if (!schoolTitle.trim()) {
-      setSchoolError("Título requerido");
-      return;
-    }
-    if (schoolHoursValue <= 0) {
-      setSchoolError("Horas debe ser > 0");
-      return;
-    }
+    setDialogOpen(true);
+  };
+
+  const openEditDialog = (rec: SchoolHourRow) => {
+    setEditingSchool(rec);
+    setSchoolTitle(rec.title);
+    setSchoolHoursValue(rec.hours);
+    const d = new Date(rec.school_date);
+    const idx =
+      (d.getFullYear() - start.getFullYear()) * 12 +
+      (d.getMonth() - start.getMonth());
+    setSelectedMonthIdx(idx < 0 ? 0 : idx > 11 ? 11 : idx);
+    setSchoolError(null);
+    setDialogOpen(true);
+  };
+
+  const handleSaveSchool = async () => {
+    setSchoolError(null);
+    if (!schoolTitle.trim()) return setSchoolError("Título requerido");
+    if (schoolHoursValue <= 0 || !Number.isInteger(schoolHoursValue))
+      return setSchoolError("Horas debe ser entero > 0");
     setSavingSchool(true);
     const { data: sessionData } = await supabase.auth.getSession();
     if (!sessionData.session) {
@@ -231,26 +273,44 @@ export default function EstadisticasPage() {
       return;
     }
     try {
-      const todayStr = new Date().toISOString().slice(0, 10);
+      // Calcular fecha (primer día del mes seleccionado)
+      const dateObj = new Date(
+        start.getFullYear(),
+        start.getMonth() + selectedMonthIdx,
+        1
+      );
+      const dateStr = dateObj.toISOString().slice(0, 10);
       const payload = {
         user_id: sessionData.session.user.id,
-        school_date: todayStr,
+        school_date: dateStr,
         hours: schoolHoursValue,
         title: schoolTitle.trim(),
       };
-      const { data, error } = await supabase
-        .from("school_hours")
-        .insert(payload)
-        .select("id, school_date, hours, title, created_at")
-        .single();
-      if (error) throw error;
-      setSchoolHours((prev) => [...prev, data as SchoolHourRow]);
+      if (editingSchool) {
+        const { data, error } = await supabase
+          .from("school_hours")
+          .update(payload)
+          .eq("id", editingSchool.id)
+          .select("id, school_date, hours, title, created_at")
+          .single();
+        if (error) throw error;
+        setSchoolHours((prev) =>
+          prev.map((r) =>
+            r.id === editingSchool.id ? (data as SchoolHourRow) : r
+          )
+        );
+      } else {
+        const { data, error } = await supabase
+          .from("school_hours")
+          .insert(payload)
+          .select("id, school_date, hours, title, created_at")
+          .single();
+        if (error) throw error;
+        setSchoolHours((prev) => [...prev, data as SchoolHourRow]);
+      }
       setDialogOpen(false);
-      setSchoolTitle("");
-      setSchoolHoursValue(1);
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Error guardando";
-      setSchoolError(msg);
+      setSchoolError(e instanceof Error ? e.message : "Error guardando");
     } finally {
       setSavingSchool(false);
     }
@@ -300,7 +360,7 @@ export default function EstadisticasPage() {
               startIcon={<AddIcon />}
               variant="contained"
               size="small"
-              onClick={() => setDialogOpen(true)}
+              onClick={openAddDialog}
             >
               Agregar Escuela
             </Button>
@@ -477,17 +537,29 @@ export default function EstadisticasPage() {
                         {s.school_date} · {s.hours}h
                       </Typography>
                     </Box>
-                    <Tooltip title="Eliminar" arrow>
-                      <span>
-                        <IconButton
-                          size="small"
-                          onClick={() => handleDeleteSchool(s.id)}
-                          disabled={deletingId === s.id}
-                        >
-                          <DeleteIcon fontSize="inherit" />
-                        </IconButton>
-                      </span>
-                    </Tooltip>
+                    <Stack direction="row" spacing={0.5}>
+                      <Tooltip title="Editar" arrow>
+                        <span>
+                          <IconButton
+                            size="small"
+                            onClick={() => openEditDialog(s)}
+                          >
+                            <EditIcon fontSize="inherit" />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                      <Tooltip title="Eliminar" arrow>
+                        <span>
+                          <IconButton
+                            size="small"
+                            onClick={() => handleDeleteSchool(s.id)}
+                            disabled={deletingId === s.id}
+                          >
+                            <DeleteIcon fontSize="inherit" />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                    </Stack>
                   </Stack>
                 ))}
               </Stack>
@@ -522,7 +594,11 @@ export default function EstadisticasPage() {
         fullWidth
         maxWidth="xs"
       >
-        <DialogTitle>Agregar horas de Escuela</DialogTitle>
+        <DialogTitle>
+          {editingSchool
+            ? "Editar horas de Escuela"
+            : "Agregar horas de Escuela"}
+        </DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <TextField
@@ -542,6 +618,35 @@ export default function EstadisticasPage() {
               size="small"
               fullWidth
             />
+            <FormControl fullWidth size="small">
+              <InputLabel id="month-label">Mes</InputLabel>
+              <Select
+                labelId="month-label"
+                label="Mes"
+                value={selectedMonthIdx}
+                onChange={(e) => setSelectedMonthIdx(Number(e.target.value))}
+              >
+                {Array.from({ length: 12 }).map((_, i) => {
+                  const d = new Date(
+                    start.getFullYear(),
+                    start.getMonth() + i,
+                    1
+                  );
+                  const label = d.toLocaleDateString("es-ES", {
+                    month: "long",
+                  });
+                  return (
+                    <MenuItem
+                      key={i}
+                      value={i}
+                      sx={{ textTransform: "capitalize" }}
+                    >
+                      {label} {d.getFullYear()}
+                    </MenuItem>
+                  );
+                })}
+              </Select>
+            </FormControl>
             {schoolError && (
               <Alert severity="error" variant="outlined">
                 {schoolError}
@@ -559,10 +664,14 @@ export default function EstadisticasPage() {
           </Button>
           <Button
             variant="contained"
-            onClick={handleAddSchool}
+            onClick={handleSaveSchool}
             disabled={savingSchool}
           >
-            {savingSchool ? "Guardando..." : "Guardar"}
+            {savingSchool
+              ? "Guardando..."
+              : editingSchool
+              ? "Actualizar"
+              : "Guardar"}
           </Button>
         </DialogActions>
       </Dialog>
