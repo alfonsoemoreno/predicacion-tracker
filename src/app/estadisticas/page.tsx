@@ -431,6 +431,61 @@ export default function EstadisticasPage() {
             <Card variant="outlined" sx={{ height: "100%" }}>
               <CardContent>
                 <Typography variant="overline" sx={{ fontWeight: 600 }}>
+                  Total combinado (h)
+                </Typography>
+                <Typography variant="h4" fontWeight={700}>
+                  {(
+                    metrics.hoursYear +
+                    metrics.schoolHoursTotal +
+                    metrics.sacredHoursYear
+                  ).toFixed(1)}
+                </Typography>
+                <Typography variant="caption" sx={{ opacity: 0.7 }}>
+                  Ministerio + Escuelas + Sagrado
+                </Typography>
+                <LinearProgress
+                  variant="determinate"
+                  value={Math.min(
+                    100,
+                    ((metrics.hoursYear +
+                      metrics.schoolHoursTotal +
+                      metrics.sacredHoursYear) /
+                      ANNUAL_GOAL_HOURS) *
+                      100
+                  )}
+                  sx={{ mt: 2, height: 8, borderRadius: 4 }}
+                  color={
+                    metrics.hoursYear +
+                      metrics.schoolHoursTotal +
+                      metrics.sacredHoursYear >=
+                    ANNUAL_GOAL_HOURS
+                      ? "success"
+                      : "secondary"
+                  }
+                />
+                <Stack direction="row" justifyContent="space-between" mt={1}>
+                  <Typography variant="caption" sx={{ opacity: 0.7 }}>
+                    Vs 600h
+                  </Typography>
+                  <Typography variant="caption" sx={{ opacity: 0.7 }}>
+                    {Math.min(
+                      100,
+                      ((metrics.hoursYear +
+                        metrics.schoolHoursTotal +
+                        metrics.sacredHoursYear) /
+                        ANNUAL_GOAL_HOURS) *
+                        100
+                    ).toFixed(1)}
+                    %
+                  </Typography>
+                </Stack>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={12} sm={6} md={4}>
+            <Card variant="outlined" sx={{ height: "100%" }}>
+              <CardContent>
+                <Typography variant="overline" sx={{ fontWeight: 600 }}>
                   Horas escuelas (h)
                 </Typography>
                 <Typography variant="h4" fontWeight={700}>
