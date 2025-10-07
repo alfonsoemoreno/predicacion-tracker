@@ -90,6 +90,7 @@ export default function EstadisticasPage() {
   const [savingSchool, setSavingSchool] = useState(false);
   const [schoolError, setSchoolError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [selectedMonthIdx, setSelectedMonthIdx] = useState<number>(() => {
     // Índice 0..11 relativo al inicio teocrático (start)
     const idx =
@@ -122,7 +123,7 @@ export default function EstadisticasPage() {
         .select("id, school_date, hours, title, created_at")
         .gte("school_date", start.toISOString().slice(0, 10))
         .lt("school_date", end.toISOString().slice(0, 10))
-        .order("school_date", { ascending: true });
+        .order("school_date", { ascending: false });
       if (schoolData) setSchoolHours(schoolData as SchoolHourRow[]);
     };
     load();
@@ -295,9 +296,11 @@ export default function EstadisticasPage() {
           .single();
         if (error) throw error;
         setSchoolHours((prev) =>
-          prev.map((r) =>
-            r.id === editingSchool.id ? (data as SchoolHourRow) : r
-          )
+          prev
+            .map((r) =>
+              r.id === editingSchool.id ? (data as SchoolHourRow) : r
+            )
+            .sort((a, b) => b.school_date.localeCompare(a.school_date))
         );
       } else {
         const { data, error } = await supabase
@@ -306,7 +309,11 @@ export default function EstadisticasPage() {
           .select("id, school_date, hours, title, created_at")
           .single();
         if (error) throw error;
-        setSchoolHours((prev) => [...prev, data as SchoolHourRow]);
+        setSchoolHours((prev) =>
+          [...prev, data as SchoolHourRow].sort((a, b) =>
+            b.school_date.localeCompare(a.school_date)
+          )
+        );
       }
       setDialogOpen(false);
     } catch (e: unknown) {
@@ -329,8 +336,12 @@ export default function EstadisticasPage() {
       setSnackbar({ open: true, message: "Error eliminando registro" });
     } finally {
       setDeletingId(null);
+      setConfirmDeleteId(null);
     }
   };
+
+  const openDeleteConfirm = (id: string) => setConfirmDeleteId(id);
+  const cancelDelete = () => setConfirmDeleteId(null);
 
   return (
     <AuthGuard>
@@ -534,7 +545,13 @@ export default function EstadisticasPage() {
                         {s.title}
                       </Typography>
                       <Typography variant="caption" sx={{ opacity: 0.7 }}>
-                        {s.school_date} · {s.hours}h
+                        {new Date(s.school_date + "T00:00:00")
+                          .toLocaleDateString("es-ES", {
+                            month: "long",
+                            year: "numeric",
+                          })
+                          .replace(/^./, (c) => c.toUpperCase())}{" "}
+                        · {s.hours}h
                       </Typography>
                     </Box>
                     <Stack direction="row" spacing={0.5}>
@@ -552,7 +569,7 @@ export default function EstadisticasPage() {
                         <span>
                           <IconButton
                             size="small"
-                            onClick={() => handleDeleteSchool(s.id)}
+                            onClick={() => openDeleteConfirm(s.id)}
                             disabled={deletingId === s.id}
                           >
                             <DeleteIcon fontSize="inherit" />
@@ -614,7 +631,8 @@ export default function EstadisticasPage() {
               type="number"
               value={schoolHoursValue}
               onChange={(e) => setSchoolHoursValue(Number(e.target.value))}
-              inputProps={{ min: 1, max: 24, step: 1 }}
+              inputProps={{ min: 1, step: 1 }}
+              helperText="Horas enteras (sin límite superior)"
               size="small"
               fullWidth
             />
@@ -654,7 +672,8 @@ export default function EstadisticasPage() {
             )}
             <Alert severity="info" variant="outlined">
               Estas horas se suman a la meta anual (600h) junto con el
-              ministerio. No se incluyen en informes mensuales.
+              ministerio. No se incluyen en informes mensuales. Puedes ingresar
+              cualquier cantidad entera.
             </Alert>
           </Stack>
         </DialogContent>
@@ -672,6 +691,35 @@ export default function EstadisticasPage() {
               : editingSchool
               ? "Actualizar"
               : "Guardar"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+      <Dialog
+        open={!!confirmDeleteId}
+        onClose={() => !deletingId && cancelDelete()}
+        fullWidth
+        maxWidth="xs"
+      >
+        <DialogTitle>Confirmar eliminación</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            ¿Seguro que deseas eliminar este registro de Escuela? Esta acción no
+            se puede deshacer.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={cancelDelete} disabled={!!deletingId}>
+            Cancelar
+          </Button>
+          <Button
+            color="error"
+            variant="contained"
+            disabled={!!deletingId}
+            onClick={() =>
+              confirmDeleteId && handleDeleteSchool(confirmDeleteId)
+            }
+          >
+            {deletingId ? "Eliminando..." : "Eliminar"}
           </Button>
         </DialogActions>
       </Dialog>
