@@ -9,6 +9,8 @@ import {
   computeTheocraticYearBase,
   THEOCRATIC_START_MONTH,
   MonthlyReportRow,
+  unlockReport,
+  recalcAndLockFrom,
 } from "@/lib/reports";
 import {
   Box,
@@ -73,6 +75,10 @@ export default function InformesPage() {
   const [editTarget, setEditTarget] = useState<MonthlyReportRow | null>(null);
   const [editComment, setEditComment] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
+  const [unlocking, setUnlocking] = useState<string | null>(null); // report id
+  const [recalcOpen, setRecalcOpen] = useState(false); // diálogo confirm
+  const [recalcFromIdx, setRecalcFromIdx] = useState<number | null>(null);
+  const [recalcLoading, setRecalcLoading] = useState(false);
   const nextIndex = reports.length; // sequential
   const canGenerate = nextIndex < 12;
   const theme = useTheme();
@@ -377,6 +383,79 @@ export default function InformesPage() {
             >
               {pdfLoading ? "Generando..." : "Descargar PDF"}
             </Button>
+            {reports.length > 0 && (
+              <Tooltip
+                title="Desbloquear el último mes para añadir/editar registros (permite recalcular luego)"
+                arrow
+              >
+                <span>
+                  <Button
+                    variant="outlined"
+                    color="warning"
+                    disabled={unlocking !== null}
+                    onClick={async () => {
+                      // Solo desbloquear el último mes cerrado (seguridad lógica)
+                      const last = reports[reports.length - 1];
+                      if (!last.locked) {
+                        alert("El último informe ya está desbloqueado.");
+                        return;
+                      }
+                      setUnlocking(last.id);
+                      try {
+                        const updated = await unlockReport(last.id);
+                        setReports((rs) =>
+                          rs.map((r) => (r.id === updated.id ? updated : r))
+                        );
+                        // Preseleccionar índice para posible recálculo posterior
+                        setRecalcFromIdx(last.month_index);
+                        alert(
+                          "Mes desbloqueado. Ahora puedes editar/añadir actividades de ese mes. Luego usa 'Recalcular' para cerrar nuevamente."
+                        );
+                      } catch (e: unknown) {
+                        const msg =
+                          e instanceof Error
+                            ? e.message
+                            : "Error desbloqueando. Verifica permisos/policies.";
+                        console.error(msg);
+                        alert(msg);
+                      } finally {
+                        setUnlocking(null);
+                      }
+                    }}
+                  >
+                    {unlocking ? "Desbloqueando..." : "Desbloquear último"}
+                  </Button>
+                </span>
+              </Tooltip>
+            )}
+            {reports.some((r) => !r.locked) && (
+              <Tooltip
+                title="Recalcula desde el primer mes desbloqueado y vuelve a bloquear la secuencia con rollover"
+                arrow
+              >
+                <span>
+                  <Button
+                    variant="contained"
+                    color="secondary"
+                    disabled={recalcLoading}
+                    onClick={() => {
+                      // Elegir min month_index desbloqueado
+                      const firstUnlocked = reports
+                        .filter((r) => !r.locked)
+                        .reduce(
+                          (min, r) =>
+                            r.month_index < min ? r.month_index : min,
+                          Infinity
+                        );
+                      setRecalcFromIdx(firstUnlocked);
+                      setRecalcOpen(true);
+                    }}
+                  >
+                    {recalcLoading ? "Recalculando..." : "Recalcular"}
+                  </Button>
+                </span>
+              </Tooltip>
+            )}
           </Stack>
         </Stack>
         {error && <Alert severity="error">{error}</Alert>}
@@ -550,6 +629,7 @@ export default function InformesPage() {
                     <TableCell>Estudios</TableCell>
                     <TableCell>Comentarios</TableCell>
                     <TableCell>Generado</TableCell>
+                    <TableCell>Estado</TableCell>
                     <TableCell align="center" sx={{ width: 50 }}>
                       Editar
                     </TableCell>
@@ -609,6 +689,27 @@ export default function InformesPage() {
                         </TableCell>
                         <TableCell>
                           {new Date(r.created_at).toLocaleDateString("es-ES")}
+                        </TableCell>
+                        <TableCell>
+                          {r.locked ? (
+                            <Typography
+                              variant="caption"
+                              color="success.main"
+                              component="span"
+                              sx={{ fontWeight: 600 }}
+                            >
+                              Cerrado
+                            </Typography>
+                          ) : (
+                            <Typography
+                              variant="caption"
+                              color="warning.main"
+                              component="span"
+                              sx={{ fontWeight: 600 }}
+                            >
+                              Abierto
+                            </Typography>
+                          )}
                         </TableCell>
                         <TableCell align="center">
                           <Tooltip title="Editar comentarios" arrow>
@@ -777,6 +878,67 @@ export default function InformesPage() {
               }}
             >
               {savingEdit ? "Guardando..." : "Guardar"}
+            </Button>
+          </DialogActions>
+        </Dialog>
+        {/* Dialog confirm recalc */}
+        <Dialog
+          open={recalcOpen}
+          onClose={() => !recalcLoading && setRecalcOpen(false)}
+          fullWidth
+          maxWidth="xs"
+        >
+          <DialogTitle>Recalcular informes encadenados</DialogTitle>
+          <DialogContent>
+            <Stack spacing={2} sx={{ mt: 1 }}>
+              <Alert severity="warning" icon={false} variant="outlined">
+                Se recalcularán todos los informes desde el mes{" "}
+                <strong style={{ textTransform: "capitalize" }}>
+                  {recalcFromIdx != null ? monthName(recalcFromIdx) : "?"}
+                </strong>{" "}
+                usando los registros actuales y se volverán a cerrar. Los
+                comentarios se preservan.
+              </Alert>
+              <Typography variant="body2" sx={{ opacity: 0.8 }}>
+                Esto es útil si agregaste actividades a un mes reabierto. El
+                rollover (minutos que pasan al siguiente) se recalculará
+                correctamente.
+              </Typography>
+            </Stack>
+          </DialogContent>
+          <DialogActions>
+            <Button
+              onClick={() => setRecalcOpen(false)}
+              disabled={recalcLoading}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="contained"
+              onClick={async () => {
+                if (recalcFromIdx == null) return;
+                setRecalcLoading(true);
+                try {
+                  const refreshed = await recalcAndLockFrom(
+                    baseYear,
+                    recalcFromIdx
+                  );
+                  setReports(refreshed);
+                  setRecalcOpen(false);
+                } catch (e: unknown) {
+                  const msg =
+                    e instanceof Error
+                      ? e.message
+                      : "Error recalculando informes";
+                  console.error(msg);
+                  alert(msg);
+                } finally {
+                  setRecalcLoading(false);
+                }
+              }}
+              disabled={recalcLoading}
+            >
+              {recalcLoading ? "Recalculando..." : "Confirmar"}
             </Button>
           </DialogActions>
         </Dialog>

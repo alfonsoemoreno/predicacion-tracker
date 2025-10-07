@@ -191,3 +191,79 @@ export async function generateMonthlyReportSequential(
   if (error) throw error;
   return { report: data as MonthlyReportRow };
 }
+
+// Desbloquear un informe mensual para permitir agregar / editar actividades
+export async function unlockReport(reportId: string) {
+  const { data, error } = await supabase
+    .from("monthly_reports")
+    .update({ locked: false })
+    .eq("id", reportId)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data as MonthlyReportRow;
+}
+
+// Recalcula y vuelve a bloquear todos los informes desde un índice dado (incluido)
+// Se usa cuando el usuario añadió actividades en un mes reabierto.
+export async function recalcAndLockFrom(
+  baseYear: number,
+  fromMonthIndex: number
+) {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const userId = sessionData.session?.user.id;
+  if (!userId) throw new Error("No autenticado");
+  // Obtener todos los informes del año (del usuario actual) porque debemos recomputar la cadena de rollover
+  const { data: allReportsRaw, error: fetchErr } = await supabase
+    .from("monthly_reports")
+    .select("*")
+    .eq("period_year", baseYear)
+    .eq("user_id", userId)
+    .order("month_index", { ascending: true });
+  if (fetchErr) throw fetchErr;
+  const allReports = (allReportsRaw || []) as MonthlyReportRow[];
+  // Mapa por month_index para acceso rápido
+  const reportByIndex: Record<number, MonthlyReportRow> = {};
+  allReports.forEach((r) => (reportByIndex[r.month_index] = r));
+  let prevLeftover = 0;
+  for (let i = 0; i < allReports.length; i++) {
+    const rpt = reportByIndex[i];
+    if (!rpt) continue; // should not happen
+    if (i < fromMonthIndex) {
+      prevLeftover = rpt.leftover_minutes; // mantener cadena
+      continue;
+    }
+    const { totalMinutes, distinctStudies, sacredServiceMinutes } =
+      await aggregateMonth(baseYear, i);
+    const carriedIn = i === 0 ? 0 : prevLeftover;
+    const effective = totalMinutes + carriedIn;
+    const wholeHours = Math.floor(effective / 60);
+    const leftover = effective % 60;
+    // Actualizar fila (mantener comentarios existentes, no regenerar comentarios automáticos aquí)
+    const { error: updErr } = await supabase
+      .from("monthly_reports")
+      .update({
+        total_minutes: totalMinutes,
+        carried_in_minutes: carriedIn,
+        carried_out_minutes: leftover,
+        whole_hours: wholeHours,
+        leftover_minutes: leftover,
+        effective_minutes: effective,
+        distinct_studies: distinctStudies,
+        sacred_service_minutes: sacredServiceMinutes,
+        locked: true,
+      })
+      .eq("id", rpt.id);
+    if (updErr) throw updErr;
+    prevLeftover = leftover;
+  }
+  // Devolver lista refrescada
+  const { data: refreshed, error: refErr } = await supabase
+    .from("monthly_reports")
+    .select("*")
+    .eq("period_year", baseYear)
+    .eq("user_id", userId)
+    .order("month_index", { ascending: true });
+  if (refErr) throw refErr;
+  return refreshed as MonthlyReportRow[];
+}
