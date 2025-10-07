@@ -46,6 +46,8 @@ import DownloadIcon from "@mui/icons-material/Download";
 import AddTaskIcon from "@mui/icons-material/AddTask";
 import EditIcon from "@mui/icons-material/Edit";
 import IconButton from "@mui/material/IconButton";
+import MoreVertIcon from "@mui/icons-material/MoreVert";
+import Menu from "@mui/material/Menu";
 
 // Pequeño componente para pares etiqueta/valor en vista móvil
 function InfoItem({ label, value }: { label: string; value: string }) {
@@ -79,6 +81,59 @@ export default function InformesPage() {
   const [recalcOpen, setRecalcOpen] = useState(false); // diálogo confirm
   const [recalcFromIdx, setRecalcFromIdx] = useState<number | null>(null);
   const [recalcLoading, setRecalcLoading] = useState(false);
+  const [actionsAnchor, setActionsAnchor] = useState<null | HTMLElement>(null);
+  const actionsMenuOpen = Boolean(actionsAnchor);
+
+  const openActionsMenu = (e: React.MouseEvent<HTMLElement>) => {
+    setActionsAnchor(e.currentTarget);
+  };
+  const closeActionsMenu = () => setActionsAnchor(null);
+
+  const handleUnlock = async () => {
+    const last = reports[reports.length - 1];
+    if (!last) return;
+    if (!last.locked) {
+      alert("El último informe ya está desbloqueado.");
+      return;
+    }
+    setUnlocking(last.id);
+    try {
+      const updated = await unlockReport(last.id);
+      setReports((rs) => rs.map((r) => (r.id === updated.id ? updated : r)));
+      setRecalcFromIdx(last.month_index);
+      alert(
+        "Mes desbloqueado. Añade/edita actividades y luego usa 'Recalcular' para cerrar nuevamente."
+      );
+    } catch (e: unknown) {
+      const raw = e instanceof Error ? e.message : String(e);
+      let friendly = raw;
+      if (raw.includes("permission") || raw.includes("denied")) {
+        friendly =
+          "Permiso denegado por RLS. Debes crear la policy UPDATE en monthly_reports. Consulta instrucciones en la consola SQL.";
+      } else if (raw.includes("row-level security")) {
+        friendly =
+          "RLS impide la acción. Falta una policy UPDATE para monthly_reports.";
+      }
+      alert(friendly);
+      console.error(raw);
+    } finally {
+      setUnlocking(null);
+      closeActionsMenu();
+    }
+  };
+
+  const handleOpenRecalc = () => {
+    const firstUnlocked = reports
+      .filter((r) => !r.locked)
+      .reduce(
+        (min, r) => (r.month_index < min ? r.month_index : min),
+        Infinity
+      );
+    if (firstUnlocked === Infinity) return;
+    setRecalcFromIdx(firstUnlocked);
+    setRecalcOpen(true);
+    closeActionsMenu();
+  };
   const nextIndex = reports.length; // sequential
   const canGenerate = nextIndex < 12;
   const theme = useTheme();
@@ -352,14 +407,14 @@ export default function InformesPage() {
             </Typography>
           </Box>
           <Stack direction="row" spacing={1} alignItems="center">
-            <FormControl size="small">
+            <FormControl size="small" sx={{ minWidth: 130 }}>
               <InputLabel>Año base</InputLabel>
               <Select
                 label="Año base"
                 value={baseYear}
                 onChange={(e) => setBaseYear(Number(e.target.value))}
+                size={isMobile ? "small" : "medium"}
               >
-                {/* Allow selecting base year +/-1 for navigation */}
                 {[baseYear - 1, baseYear, baseYear + 1].map((y) => (
                   <MenuItem key={y} value={y}>
                     {y}-{y + 1}
@@ -367,94 +422,107 @@ export default function InformesPage() {
                 ))}
               </Select>
             </FormControl>
-            <Button
-              startIcon={<AddTaskIcon />}
-              variant="contained"
-              disabled={!canGenerate}
-              onClick={() => setGenOpen(true)}
-            >
-              Generar informe
-            </Button>
-            <Button
-              startIcon={<DownloadIcon />}
-              variant="outlined"
-              disabled={reports.length === 0 || pdfLoading}
-              onClick={downloadPdf}
-            >
-              {pdfLoading ? "Generando..." : "Descargar PDF"}
-            </Button>
-            {reports.length > 0 && (
-              <Tooltip
-                title="Desbloquear el último mes para añadir/editar registros (permite recalcular luego)"
-                arrow
-              >
-                <span>
-                  <Button
-                    variant="outlined"
-                    color="warning"
-                    disabled={unlocking !== null}
-                    onClick={async () => {
-                      // Solo desbloquear el último mes cerrado (seguridad lógica)
-                      const last = reports[reports.length - 1];
-                      if (!last.locked) {
-                        alert("El último informe ya está desbloqueado.");
-                        return;
-                      }
-                      setUnlocking(last.id);
-                      try {
-                        const updated = await unlockReport(last.id);
-                        setReports((rs) =>
-                          rs.map((r) => (r.id === updated.id ? updated : r))
-                        );
-                        // Preseleccionar índice para posible recálculo posterior
-                        setRecalcFromIdx(last.month_index);
-                        alert(
-                          "Mes desbloqueado. Ahora puedes editar/añadir actividades de ese mes. Luego usa 'Recalcular' para cerrar nuevamente."
-                        );
-                      } catch (e: unknown) {
-                        const msg =
-                          e instanceof Error
-                            ? e.message
-                            : "Error desbloqueando. Verifica permisos/policies.";
-                        console.error(msg);
-                        alert(msg);
-                      } finally {
-                        setUnlocking(null);
-                      }
-                    }}
-                  >
-                    {unlocking ? "Desbloqueando..." : "Desbloquear último"}
-                  </Button>
-                </span>
-              </Tooltip>
-            )}
-            {reports.some((r) => !r.locked) && (
-              <Tooltip
-                title="Recalcula desde el primer mes desbloqueado y vuelve a bloquear la secuencia con rollover"
-                arrow
-              >
-                <span>
-                  <Button
-                    variant="contained"
-                    color="secondary"
-                    disabled={recalcLoading}
+            {isMobile ? (
+              <>
+                <IconButton
+                  aria-label="Acciones de informes"
+                  onClick={openActionsMenu}
+                  size="small"
+                  sx={{ border: "1px solid", borderColor: "divider" }}
+                >
+                  <MoreVertIcon fontSize="small" />
+                </IconButton>
+                <Menu
+                  anchorEl={actionsAnchor}
+                  open={actionsMenuOpen}
+                  onClose={closeActionsMenu}
+                  anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+                  transformOrigin={{ vertical: "top", horizontal: "right" }}
+                >
+                  <MenuItem
+                    disabled={!canGenerate}
                     onClick={() => {
-                      // Elegir min month_index desbloqueado
-                      const firstUnlocked = reports
-                        .filter((r) => !r.locked)
-                        .reduce(
-                          (min, r) =>
-                            r.month_index < min ? r.month_index : min,
-                          Infinity
-                        );
-                      setRecalcFromIdx(firstUnlocked);
-                      setRecalcOpen(true);
+                      setGenOpen(true);
+                      closeActionsMenu();
                     }}
                   >
-                    {recalcLoading ? "Recalculando..." : "Recalcular"}
-                  </Button>
-                </span>
-              </Tooltip>
+                    Generar informe
+                  </MenuItem>
+                  <MenuItem
+                    disabled={reports.length === 0 || pdfLoading}
+                    onClick={() => {
+                      downloadPdf();
+                      closeActionsMenu();
+                    }}
+                  >
+                    {pdfLoading ? "Generando PDF…" : "Descargar PDF"}
+                  </MenuItem>
+                  <MenuItem
+                    disabled={reports.length === 0 || unlocking !== null}
+                    onClick={handleUnlock}
+                  >
+                    {unlocking ? "Desbloqueando…" : "Desbloquear último"}
+                  </MenuItem>
+                  <MenuItem
+                    disabled={!reports.some((r) => !r.locked) || recalcLoading}
+                    onClick={handleOpenRecalc}
+                  >
+                    {recalcLoading ? "Recalculando…" : "Recalcular"}
+                  </MenuItem>
+                </Menu>
+              </>
+            ) : (
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Button
+                  startIcon={<AddTaskIcon />}
+                  variant="contained"
+                  size="small"
+                  disabled={!canGenerate}
+                  onClick={() => setGenOpen(true)}
+                >
+                  Generar
+                </Button>
+                <Button
+                  startIcon={<DownloadIcon />}
+                  variant="outlined"
+                  size="small"
+                  disabled={reports.length === 0 || pdfLoading}
+                  onClick={downloadPdf}
+                >
+                  {pdfLoading ? "Generando…" : "PDF"}
+                </Button>
+                <Tooltip
+                  title="Desbloquear último mes para editar registros"
+                  arrow
+                >
+                  <span>
+                    <Button
+                      variant="outlined"
+                      color="warning"
+                      size="small"
+                      disabled={reports.length === 0 || unlocking !== null}
+                      onClick={handleUnlock}
+                    >
+                      {unlocking ? "..." : "Desbloquear"}
+                    </Button>
+                  </span>
+                </Tooltip>
+                <Tooltip title="Recalcular desde el primer mes abierto" arrow>
+                  <span>
+                    <Button
+                      variant="contained"
+                      color="secondary"
+                      size="small"
+                      disabled={
+                        !reports.some((r) => !r.locked) || recalcLoading
+                      }
+                      onClick={handleOpenRecalc}
+                    >
+                      {recalcLoading ? "..." : "Recalcular"}
+                    </Button>
+                  </span>
+                </Tooltip>
+              </Stack>
             )}
           </Stack>
         </Stack>
